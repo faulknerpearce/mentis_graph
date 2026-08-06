@@ -1,24 +1,45 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { forceCollide } from 'd3-force-3d'
 import ForceGraph2D, {
   type ForceGraphMethods,
   type NodeObject,
   type LinkObject,
 } from 'react-force-graph-2d'
+import type {
+  ForceGraphMethods as ForceGraph3DMethods,
+  NodeObject as NodeObject3D,
+  LinkObject as LinkObject3D,
+} from 'react-force-graph-3d'
 import type { Theme } from '../hooks/useTheme'
-import type { GraphData, GraphLink, GraphNode } from '../types'
+import type { GraphData, GraphLink, GraphMode, GraphNode } from '../types'
+
+const ForceGraph3D = lazy(() => import('react-force-graph-3d'))
 
 interface ThoughtGraphProps {
   data: GraphData
   selectedId: string | null
   theme: Theme
   onSelect: (node: GraphNode | null) => void
+  mode: GraphMode
   resetKey: number
 }
 
 type FGNode = NodeObject<GraphNode>
 type FGLink = LinkObject<GraphNode, GraphLink>
-type SimNode = GraphNode & FGNode
+type SimNode = GraphNode & FGNode & { z?: number }
+type FGNode3D = NodeObject3D<GraphNode>
+type FGLink3D = LinkObject3D<GraphNode, GraphLink>
+type SimNode3D = GraphNode & FGNode3D
+
+type Position = { x: number; y: number; z?: number }
 
 const THEME_CANVAS = {
   light: {
@@ -47,16 +68,16 @@ export function ThoughtGraph({
   selectedId,
   theme,
   onSelect,
+  mode,
   resetKey,
 }: ThoughtGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const fgRef = useRef<ForceGraphMethods<FGNode, FGLink> | undefined>(
-    undefined,
-  )
+  const fgRef = useRef<ForceGraphMethods<FGNode, FGLink> | undefined>(undefined)
+  const fg3dRef = useRef<ForceGraph3DMethods | undefined>(undefined)
   // The library runs the d3-force simulation on its own node objects, so the
   // input nodes never receive live x/y. Capture the rendered positions from
   // the per-node paint callback into a map keyed by node id.
-  const posRef = useRef(new Map<string, { x: number; y: number }>())
+  const posRef = useRef(new Map<string, Position>())
   const nodesRef = useRef<SimNode[]>([])
   const lastResetKeyRef = useRef(resetKey)
   const onSelectRef = useRef(onSelect)
@@ -74,7 +95,7 @@ export function ThoughtGraph({
 
     const nodes = data.nodes.map((n) => {
       const pos = posRef.current.get(n.id)
-      return pos ? { ...n, x: pos.x, y: pos.y } : ({ ...n } as SimNode)
+      return pos ? { ...n, ...pos } : ({ ...n } as SimNode)
     }) as SimNode[]
 
     nodesRef.current = nodes
@@ -88,14 +109,14 @@ export function ThoughtGraph({
   // This force is applied to the simulation's live node objects by the graph
   // library, rather than the immutable React graphData snapshot.
   useEffect(() => {
-    const fg = fgRef.current
+    const fg = mode === '3d' ? fg3dRef.current : fgRef.current
     if (!fg) return
     const collision = forceCollide<SimNode>((node) =>
       (node.size ?? 4.5) * 1.25 + NODE_GAP,
-    ).iterations(2)
+    ).iterations(4)
     fg.d3Force('collide', collision)
     fg.d3ReheatSimulation()
-  }, [graphData])
+  }, [graphData, mode, size.width, size.height])
 
   useEffect(() => {
     const el = containerRef.current
@@ -116,14 +137,35 @@ export function ThoughtGraph({
   }, [])
 
   useEffect(() => {
-    if (!selectedId || !fgRef.current) return
+    if (!selectedId) return
     const pos = posRef.current.get(selectedId)
     if (!pos) return
-    fgRef.current.centerAt(pos.x, pos.y, 400)
-  }, [selectedId, graphData.nodes])
+    if (mode === '3d') {
+      fg3dRef.current?.cameraPosition(
+        { x: pos.x + 80, y: pos.y + 80, z: (pos.z ?? 0) + 80 },
+        { x: pos.x, y: pos.y, z: pos.z ?? 0 },
+        400,
+      )
+    } else {
+      fgRef.current?.centerAt(pos.x, pos.y, 400)
+    }
+  }, [selectedId, graphData.nodes, mode])
+
+  const capture3dPositions = useCallback(() => {
+    for (const node of graphData.nodes) {
+      if (
+        node.x != null &&
+        node.y != null &&
+        node.z != null
+      ) {
+        posRef.current.set(node.id, { x: node.x, y: node.y, z: node.z })
+      }
+    }
+  }, [graphData.nodes])
 
   const nodeAtClient = useCallback(
     (clientX: number, clientY: number): GraphNode | null => {
+      if (mode !== '2d') return null
       const fg = fgRef.current
       const canvas = containerRef.current?.querySelector('canvas')
       if (!fg || !canvas) return null
@@ -151,7 +193,7 @@ export function ThoughtGraph({
       }
       return best
     },
-    [],
+    [mode],
   )
 
   // Own click handling — force-graph's onBackgroundClick marks any slight
@@ -159,6 +201,7 @@ export function ThoughtGraph({
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    if (mode !== '2d') return
 
     let down: { x: number; y: number } | null = null
 
@@ -188,7 +231,7 @@ export function ThoughtGraph({
       el.removeEventListener('pointerup', onPointerUp)
       el.removeEventListener('pointercancel', onPointerCancel)
     }
-  }, [nodeAtClient])
+  }, [nodeAtClient, mode])
 
   const paintNode = useCallback(
     (node: FGNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -233,30 +276,65 @@ export function ThoughtGraph({
   return (
     <div className="graph-canvas" ref={containerRef}>
       {size.width > 0 && (
-        <ForceGraph2D
-          ref={fgRef}
-          width={size.width}
-          height={size.height}
-          graphData={graphData}
-          nodeId="id"
-          linkSource="source"
-          linkTarget="target"
-          backgroundColor={palette.background}
-          nodeCanvasObjectMode={() => 'replace'}
-          nodeCanvasObject={paintNode}
-          linkColor={(link) =>
-            (link as GraphLink).color || palette.linkFallback
-          }
-          linkWidth={(link) =>
-            (link as GraphLink).kind === 'spine' ? 0.45 : 0.85
-          }
-          linkDirectionalArrowLength={2.8}
-          linkDirectionalArrowRelPos={1}
-          enableNodeDrag={false}
-          enablePointerInteraction={false}
-          cooldownTicks={220}
-           d3VelocityDecay={0.35}
-        />
+        mode === '3d' ? (
+          <Suspense fallback={<div className="graph-loading">Loading 3D graph...</div>}>
+            <ForceGraph3D
+              ref={fg3dRef}
+              width={size.width}
+              height={size.height}
+              graphData={graphData}
+              nodeId="id"
+              linkSource="source"
+            linkTarget="target"
+            backgroundColor={palette.background}
+            nodeRelSize={3}
+            nodeVal={(node) => (node as SimNode3D).size}
+              nodeColor={(node) => (node as SimNode3D).color}
+              nodeLabel={(node) => (node as SimNode3D).title}
+              linkLabel={(link) => (link as FGLink3D).label}
+              linkColor={(link) =>
+                (link as GraphLink).color || palette.linkFallback
+              }
+              linkWidth={(link) =>
+                (link as GraphLink).kind === 'spine' ? 0.45 : 0.85
+              }
+              linkDirectionalArrowLength={3.5}
+              linkDirectionalArrowRelPos={1}
+              enableNodeDrag={false}
+              enablePointerInteraction
+              onNodeClick={(node) => onSelect(node as GraphNode)}
+              onBackgroundClick={() => onSelect(null)}
+              onEngineTick={capture3dPositions}
+              cooldownTicks={220}
+              d3VelocityDecay={0.35}
+            />
+          </Suspense>
+        ) : (
+          <ForceGraph2D
+            ref={fgRef}
+            width={size.width}
+            height={size.height}
+            graphData={graphData}
+            nodeId="id"
+            linkSource="source"
+            linkTarget="target"
+            backgroundColor={palette.background}
+            nodeCanvasObjectMode={() => 'replace'}
+            nodeCanvasObject={paintNode}
+            linkColor={(link) =>
+              (link as GraphLink).color || palette.linkFallback
+            }
+            linkWidth={(link) =>
+              (link as GraphLink).kind === 'spine' ? 0.45 : 0.85
+            }
+            linkDirectionalArrowLength={2.8}
+            linkDirectionalArrowRelPos={1}
+            enableNodeDrag={false}
+            enablePointerInteraction={false}
+            cooldownTicks={220}
+            d3VelocityDecay={0.35}
+          />
+        )
       )}
     </div>
   )

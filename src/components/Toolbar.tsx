@@ -1,4 +1,4 @@
-import type { EdgeToggles } from '../types'
+import type { EdgeToggles, GraphMode } from '../types'
 import { TYPE_COLORS } from '../graph/buildGraph'
 
 interface ToolbarProps {
@@ -9,6 +9,8 @@ interface ToolbarProps {
   onTypesChange: (types: Set<string> | null) => void
   edgeToggles: EdgeToggles
   onEdgeTogglesChange: (toggles: EdgeToggles) => void
+  graphMode: GraphMode
+  onGraphModeChange: (mode: GraphMode) => void
   loading: boolean
   progress: string | null
   nodeCount: number
@@ -25,6 +27,8 @@ export function Toolbar({
   onTypesChange,
   edgeToggles,
   onEdgeTogglesChange,
+  graphMode,
+  onGraphModeChange,
   loading,
   progress,
   nodeCount,
@@ -78,6 +82,19 @@ export function Toolbar({
         >
           Reset layout
         </button>
+        <div className="mode-toggle" role="group" aria-label="Graph mode">
+          {(['2d', '3d'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={`btn ghost${graphMode === mode ? ' active' : ''}`}
+              onClick={() => onGraphModeChange(mode)}
+              aria-pressed={graphMode === mode}
+            >
+              {mode.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="toolbar-row wrap">

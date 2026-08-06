@@ -9,6 +9,7 @@ import { useTheme } from './hooks/useTheme'
 import type {
   ChainInfo,
   EdgeToggles,
+  GraphMode,
   GraphNode,
   Thought,
 } from './types'
@@ -16,7 +17,7 @@ import type {
 const DEFAULT_EDGES: EdgeToggles = {
   relations: true,
   refs: true,
-  spine: false,
+  spine: true,
 }
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [selectedTypes, setSelectedTypes] = useState<Set<string> | null>(null)
   const [edgeToggles, setEdgeToggles] = useState<EdgeToggles>(DEFAULT_EDGES)
+  const [graphMode, setGraphMode] = useState<GraphMode>('2d')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [layoutResetKey, setLayoutResetKey] = useState(0)
 
@@ -83,7 +85,6 @@ export default function App() {
 
   const handleEdgeTogglesChange = (next: EdgeToggles) => {
     setEdgeToggles(next)
-    setLayoutResetKey((key) => key + 1)
   }
 
   const resetLayout = () => {
@@ -191,6 +192,8 @@ export default function App() {
             onTypesChange={setSelectedTypes}
             edgeToggles={edgeToggles}
             onEdgeTogglesChange={handleEdgeTogglesChange}
+            graphMode={graphMode}
+            onGraphModeChange={setGraphMode}
             loading={loading}
             progress={progress}
             nodeCount={visibleGraph.nodes.length}
@@ -204,6 +207,7 @@ export default function App() {
               selectedId={selectedId}
               theme={theme}
               onSelect={handleSelect}
+              mode={graphMode}
               resetKey={layoutResetKey}
             />
           </div>
