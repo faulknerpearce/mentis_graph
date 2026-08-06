@@ -22,10 +22,9 @@ const DEFAULT_EDGES: EdgeToggles = {
 export default function App() {
   const { theme, toggleTheme } = useTheme()
   const [chains, setChains] = useState<ChainInfo[]>([])
-  const [defaultChainKey, setDefaultChainKey] = useState('aseryx-brain')
-  const [selectedChains, setSelectedChains] = useState<string[]>([
-    'aseryx-brain',
-  ])
+  const [defaultChainKey, setDefaultChainKey] = useState('')
+  // Empty until /v1/chains resolves — avoids a hardcoded default double-fetch.
+  const [selectedChains, setSelectedChains] = useState<string[]>([])
   const [thoughts, setThoughts] = useState<Thought[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,12 +43,7 @@ export default function App() {
         if (cancelled) return
         setChains(res.chains)
         setDefaultChainKey(res.default_chain_key)
-        const initial = res.chains.some(
-          (c) => c.chain_key === res.default_chain_key,
-        )
-          ? [res.default_chain_key]
-          : res.chain_keys.slice(0, 1)
-        setSelectedChains(initial)
+        setSelectedChains(res.chain_keys)
       } catch (err) {
         if (!cancelled) {
           setError(
@@ -112,14 +106,9 @@ export default function App() {
   const nodesById = useMemo(() => {
     const map = new Map<string, GraphNode>()
     // Prefer full graph so a selected thought stays resolvable even if filters hide it.
-    for (const node of fullGraph.nodes) {
-      map.set(node.id, node)
-    }
-    for (const node of visibleGraph.nodes) {
-      map.set(node.id, node)
-    }
+    for (const node of fullGraph.nodes) map.set(node.id, node)
     return map
-  }, [fullGraph.nodes, visibleGraph.nodes])
+  }, [fullGraph.nodes])
 
   const selectedNode = selectedId ? (nodesById.get(selectedId) ?? null) : null
 

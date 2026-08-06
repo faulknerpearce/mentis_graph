@@ -19,7 +19,7 @@ Chain data is read from MentisDB storage (default `~/.cloudllm/mentisdb/`) via R
 ## Run locally
 
 ```bash
-cd ~/workspace/mentis-graph
+cd ~/workspace/mentis_graph
 npm install
 npm run dev
 ```
@@ -30,9 +30,9 @@ Vite proxies `/api/*` → `http://127.0.0.1:9472/*` so the browser avoids CORS.
 
 ## Usage
 
-- **Chains** (left): pick one or more chains. Default is MentisDB’s default chain (`aseryx-brain`). Use **Select all** to load every chain (~2.3k thoughts — can be slow).
+- **Chains** (left): all chains are selected on load (~2.3k thoughts — first load can be slow). Uncheck any you don’t need.
 - **Edges**: toggle typed **Relations**, positional **Refs**, and optional append-order **Hash spine** (off by default).
-- **Types / search**: filter the visible graph.
+- **Types / search**: all thought types are shown by default; click a type chip to narrow the graph.
 - **Click a node**: detail panel shows content, tags, and inbound/outbound neighbors.
 
 ## Scripts
