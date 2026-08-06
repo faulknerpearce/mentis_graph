@@ -14,6 +14,7 @@ interface ToolbarProps {
   nodeCount: number
   linkCount: number
   onReload: () => void
+  onResetLayout: () => void
 }
 
 export function Toolbar({
@@ -29,6 +30,7 @@ export function Toolbar({
   nodeCount,
   linkCount,
   onReload,
+  onResetLayout,
 }: ToolbarProps) {
   const toggleType = (type: string) => {
     if (selectedTypes === null) {
@@ -67,6 +69,14 @@ export function Toolbar({
           disabled={loading}
         >
           {loading ? 'Loading…' : 'Reload'}
+        </button>
+        <button
+          type="button"
+          className="btn ghost"
+          onClick={onResetLayout}
+          disabled={loading}
+        >
+          Reset layout
         </button>
       </div>
 

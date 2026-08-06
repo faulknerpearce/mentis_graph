@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { forceCollide } from 'd3-force-3d'
 import ForceGraph2D, {
   type ForceGraphMethods,
   type NodeObject,
@@ -12,6 +13,7 @@ interface ThoughtGraphProps {
   selectedId: string | null
   theme: Theme
   onSelect: (node: GraphNode | null) => void
+  resetKey: number
 }
 
 type FGNode = NodeObject<GraphNode>
@@ -37,12 +39,15 @@ const THEME_CANVAS = {
 const CLICK_MOVE_TOLERANCE_PX = 6
 /** Extra screen-space radius (px) around each node for easier targeting. */
 const HIT_PADDING_PX = 12
+/** Minimum graph-space gap between rendered node circles. */
+const NODE_GAP = 4
 
 export function ThoughtGraph({
   data,
   selectedId,
   theme,
   onSelect,
+  resetKey,
 }: ThoughtGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const fgRef = useRef<ForceGraphMethods<FGNode, FGLink> | undefined>(
@@ -53,6 +58,7 @@ export function ThoughtGraph({
   // the per-node paint callback into a map keyed by node id.
   const posRef = useRef(new Map<string, { x: number; y: number }>())
   const nodesRef = useRef<SimNode[]>([])
+  const lastResetKeyRef = useRef(resetKey)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
 
@@ -61,6 +67,11 @@ export function ThoughtGraph({
 
   // Preserve simulation positions across data refreshes.
   const graphData = useMemo(() => {
+    if (lastResetKeyRef.current !== resetKey) {
+      posRef.current.clear()
+      lastResetKeyRef.current = resetKey
+    }
+
     const nodes = data.nodes.map((n) => {
       const pos = posRef.current.get(n.id)
       return pos ? { ...n, x: pos.x, y: pos.y } : ({ ...n } as SimNode)
@@ -71,7 +82,20 @@ export function ThoughtGraph({
       nodes,
       links: data.links.map((l) => ({ ...l })),
     }
-  }, [data])
+  }, [data, resetKey])
+
+  // Keep node circles apart, including the larger selected-node rendering.
+  // This force is applied to the simulation's live node objects by the graph
+  // library, rather than the immutable React graphData snapshot.
+  useEffect(() => {
+    const fg = fgRef.current
+    if (!fg) return
+    const collision = forceCollide<SimNode>((node) =>
+      (node.size ?? 4.5) * 1.25 + NODE_GAP,
+    ).iterations(2)
+    fg.d3Force('collide', collision)
+    fg.d3ReheatSimulation()
+  }, [graphData])
 
   useEffect(() => {
     const el = containerRef.current
@@ -230,8 +254,8 @@ export function ThoughtGraph({
           linkDirectionalArrowRelPos={1}
           enableNodeDrag={false}
           enablePointerInteraction={false}
-          cooldownTicks={140}
-          d3VelocityDecay={0.28}
+          cooldownTicks={220}
+           d3VelocityDecay={0.35}
         />
       )}
     </div>

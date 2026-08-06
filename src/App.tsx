@@ -34,6 +34,7 @@ export default function App() {
   const [selectedTypes, setSelectedTypes] = useState<Set<string> | null>(null)
   const [edgeToggles, setEdgeToggles] = useState<EdgeToggles>(DEFAULT_EDGES)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [layoutResetKey, setLayoutResetKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -61,6 +62,7 @@ export default function App() {
 
   const loadThoughts = useCallback(async (keys: string[]) => {
     if (keys.length === 0) return
+    setLayoutResetKey((key) => key + 1)
     setLoading(true)
     setError(null)
     setProgress('Starting…')
@@ -78,6 +80,15 @@ export default function App() {
       setLoading(false)
     }
   }, [])
+
+  const handleEdgeTogglesChange = (next: EdgeToggles) => {
+    setEdgeToggles(next)
+    setLayoutResetKey((key) => key + 1)
+  }
+
+  const resetLayout = () => {
+    setLayoutResetKey((key) => key + 1)
+  }
 
   useEffect(() => {
     if (selectedChains.length === 0) return
@@ -179,12 +190,13 @@ export default function App() {
             selectedTypes={selectedTypes}
             onTypesChange={setSelectedTypes}
             edgeToggles={edgeToggles}
-            onEdgeTogglesChange={setEdgeToggles}
+            onEdgeTogglesChange={handleEdgeTogglesChange}
             loading={loading}
             progress={progress}
             nodeCount={visibleGraph.nodes.length}
             linkCount={visibleGraph.links.length}
             onReload={() => void loadThoughts(selectedChains)}
+            onResetLayout={resetLayout}
           />
           <div className="graph-stage">
             <ThoughtGraph
@@ -192,6 +204,7 @@ export default function App() {
               selectedId={selectedId}
               theme={theme}
               onSelect={handleSelect}
+              resetKey={layoutResetKey}
             />
           </div>
         </main>
