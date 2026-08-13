@@ -1,4 +1,8 @@
-import type { ChainsResponse, Thought, TraverseResponse } from '../types'
+import type {
+  ChainsResponse,
+  Thought,
+  TraverseResponse,
+} from '../types'
 
 const API_BASE = '/api'
 
@@ -56,6 +60,7 @@ export async function traverseChunk(params: {
 export async function loadChainThoughts(
   chainKey: string,
   onProgress?: (loaded: number, chainKey: string) => void,
+  isCancelled?: () => boolean,
 ): Promise<Thought[]> {
   const thoughts: Thought[] = []
   let page = await traverseChunk({
@@ -66,6 +71,8 @@ export async function loadChainThoughts(
   })
 
   while (true) {
+    if (isCancelled?.()) return thoughts
+
     for (const thought of page.thoughts) {
       thoughts.push({ ...thought, chain_key: chainKey })
     }
@@ -89,10 +96,12 @@ export async function loadChainThoughts(
 export async function loadThoughtsForChains(
   chainKeys: string[],
   onProgress?: (loaded: number, chainKey: string) => void,
+  isCancelled?: () => boolean,
 ): Promise<Thought[]> {
   const all: Thought[] = []
   for (const key of chainKeys) {
-    const chunk = await loadChainThoughts(key, onProgress)
+    if (isCancelled?.()) return all
+    const chunk = await loadChainThoughts(key, onProgress, isCancelled)
     all.push(...chunk)
   }
   return all

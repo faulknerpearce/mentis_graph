@@ -31,7 +31,8 @@ Vite proxies `/api/*` → `http://127.0.0.1:9472/*` so the browser avoids CORS.
 ## Usage
 
 - **Chains** (left): all chains are selected on load (~2.3k thoughts — first load can be slow). Uncheck any you don’t need.
-- **Edges**: toggle typed **Relations**, positional **Refs**, and optional append-order **Hash spine** (off by default).
+- **Edges**: toggle typed **Relations**, positional **Refs**, and append-order **Hash spine** (on by default).
+- **Graph mode**: switch between the default 2D canvas and interactive 3D WebGL mode from the toolbar.
 - **Types / search**: all thought types are shown by default; click a type chip to narrow the graph.
 - **Click a node**: detail panel shows content, tags, and inbound/outbound neighbors.
 

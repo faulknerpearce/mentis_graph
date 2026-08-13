@@ -102,6 +102,8 @@ export interface GraphData {
   links: GraphLink[]
 }
 
+export type GraphMode = '2d' | '3d'
+
 export interface EdgeToggles {
   relations: boolean
   refs: boolean

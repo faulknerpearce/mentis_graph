@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listChains, loadThoughtsForChains } from './api/mentis'
-import { buildGraph, colorForThoughtType, filterGraph } from './graph/buildGraph'
+import { buildGraph, filterGraph, neighborIdsFor } from './graph/buildGraph'
 import { Explorer } from './components/Explorer'
 import { ThoughtGraph } from './components/ThoughtGraph'
+import { ThoughtContentModal } from './components/ThoughtContentModal'
 import { ThoughtDetail } from './components/ThoughtDetail'
 import { Toolbar } from './components/Toolbar'
 import { useTheme } from './hooks/useTheme'
 import { facetOptions } from './lib/facets'
+import { colorForThoughtType } from './theme/palette'
 import type {
   EdgeToggles,
+  GraphMode,
   GraphNode,
   Thought,
 } from './types'
@@ -16,7 +19,7 @@ import type {
 const DEFAULT_EDGES: EdgeToggles = {
   relations: true,
   refs: true,
-  spine: false,
+  spine: true,
 }
 
 export default function App() {
@@ -32,8 +35,10 @@ export default function App() {
   const [selectedTypes, setSelectedTypes] = useState<Set<string> | null>(null)
   const [chainFilter, setChainFilter] = useState<Set<string> | null>(null)
   const [edgeToggles, setEdgeToggles] = useState<EdgeToggles>(DEFAULT_EDGES)
+  const [graphMode, setGraphMode] = useState<GraphMode>('2d')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [layoutResetKey, setLayoutResetKey] = useState(0)
+  const loadGenRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
@@ -59,28 +64,37 @@ export default function App() {
 
   const loadThoughts = useCallback(async (keys: string[]) => {
     if (keys.length === 0) return
+    const gen = ++loadGenRef.current
+    const isCancelled = () => gen !== loadGenRef.current
+
     setLayoutResetKey((key) => key + 1)
     setLoading(true)
     setError(null)
     setProgress('Starting…')
     setSelectedId(null)
     try {
-      const loaded = await loadThoughtsForChains(keys, (count, chainKey) => {
-        setProgress(`Loaded ${count} from ${chainKey}…`)
-      })
+      const loaded = await loadThoughtsForChains(
+        keys,
+        (count, chainKey) => {
+          if (isCancelled()) return
+          setProgress(`Loaded ${count} from ${chainKey}…`)
+        },
+        isCancelled,
+      )
+      if (isCancelled()) return
       setThoughts(loaded)
       setProgress(null)
     } catch (err) {
+      if (isCancelled()) return
       setError(err instanceof Error ? err.message : String(err))
       setProgress(null)
     } finally {
-      setLoading(false)
+      if (!isCancelled()) setLoading(false)
     }
   }, [])
 
   const handleEdgeTogglesChange = (next: EdgeToggles) => {
     setEdgeToggles(next)
-    setLayoutResetKey((key) => key + 1)
   }
 
   const resetLayout = () => {
@@ -103,8 +117,11 @@ export default function App() {
   )
 
   const typeOptions = useMemo(
-    () => facetOptions(thoughts, (t) => t.thought_type, colorForThoughtType),
-    [thoughts],
+    () =>
+      facetOptions(thoughts, (t) => t.thought_type, (value) =>
+        colorForThoughtType(value, theme),
+      ),
+    [thoughts, theme],
   )
   const chainOptions = useMemo(
     () => facetOptions(thoughts, (t) => t.chain_key || 'unknown'),
@@ -130,21 +147,11 @@ export default function App() {
 
   const selectedNode = selectedId ? (nodesById.get(selectedId) ?? null) : null
 
-  const detailLinks = useMemo(() => {
-    if (!selectedId) return visibleGraph.links
-    // Show neighbors from the full graph, not only the filtered view.
-    return fullGraph.links.filter((link) => {
-      const source =
-        typeof link.source === 'string'
-          ? link.source
-          : (link.source as { id?: string }).id
-      const target =
-        typeof link.target === 'string'
-          ? link.target
-          : (link.target as { id?: string }).id
-      return source === selectedId || target === selectedId
-    })
-  }, [selectedId, fullGraph.links, visibleGraph.links])
+  // Always full-graph neighbors so dimming matches the detail panel.
+  const selectionNeighborIds = useMemo(
+    () => neighborIdsFor(selectedId, fullGraph.links),
+    [selectedId, fullGraph.links],
+  )
 
   const handleSelect = (node: GraphNode | null) => {
     setSelectedId(node?.id ?? null)
@@ -153,9 +160,12 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div>
-          <h1>Mentis Thought Graph</h1>
-          <p>Interactive view of MentisDB thought chains and relations</p>
+        <div className="brand-mark">
+          <h1 className="brand-name">Mentis</h1>
+          <div className="brand-product">Thought Graph</div>
+          <p className="brand-tagline">
+            Memory chains and relations from MentisDB
+          </p>
         </div>
         <button
           type="button"
@@ -164,10 +174,27 @@ export default function App() {
           aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
           title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
         >
-          <span className="theme-toggle-icon" aria-hidden="true">
-            {theme === 'light' ? '◐' : '◑'}
-          </span>
-          {theme === 'light' ? 'Dark mode' : 'Light mode'}
+          <svg
+            className="theme-toggle-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.75"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            {theme === 'light' ? (
+              <>
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </>
+            ) : (
+              <>
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+              </>
+            )}
+          </svg>
         </button>
       </header>
 
@@ -198,27 +225,38 @@ export default function App() {
             onTypesChange={setSelectedTypes}
             edgeToggles={edgeToggles}
             onEdgeTogglesChange={handleEdgeTogglesChange}
+            graphMode={graphMode}
+            onGraphModeChange={setGraphMode}
             loading={loading}
             progress={progress}
             nodeCount={visibleGraph.nodes.length}
             linkCount={visibleGraph.links.length}
             onReload={() => void loadThoughts(selectedChains)}
             onResetLayout={resetLayout}
+            theme={theme}
           />
           <div className="graph-stage">
             <ThoughtGraph
               data={visibleGraph}
               selectedId={selectedId}
+              neighborIds={selectionNeighborIds}
               theme={theme}
               onSelect={handleSelect}
+              mode={graphMode}
               resetKey={layoutResetKey}
             />
+            {selectedNode && (
+              <ThoughtContentModal
+                node={selectedNode}
+                onClose={() => setSelectedId(null)}
+              />
+            )}
           </div>
         </main>
 
         <ThoughtDetail
           node={selectedNode}
-          links={detailLinks}
+          links={fullGraph.links}
           nodesById={nodesById}
           onSelectNeighbor={setSelectedId}
           onClose={() => setSelectedId(null)}
