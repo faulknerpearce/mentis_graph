@@ -109,3 +109,16 @@ export interface EdgeToggles {
   refs: boolean
   spine: boolean
 }
+
+export interface FacetOption {
+  value: string
+  label: string
+  count: number
+  color?: string
+}
+
+export interface GraphFilters {
+  types: Set<string> | null
+  chains: Set<string> | null
+  search: string
+}

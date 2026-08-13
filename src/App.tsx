@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listChains, loadThoughtsForChains } from './api/mentis'
 import { buildGraph, filterGraph, neighborIdsFor } from './graph/buildGraph'
-import { ChainPicker } from './components/ChainPicker'
+import { Explorer } from './components/Explorer'
 import { ThoughtGraph } from './components/ThoughtGraph'
 import { ThoughtContentModal } from './components/ThoughtContentModal'
 import { ThoughtDetail } from './components/ThoughtDetail'
 import { Toolbar } from './components/Toolbar'
 import { useTheme } from './hooks/useTheme'
+import { facetOptions } from './lib/facets'
+import { colorForThoughtType } from './theme/palette'
 import type {
-  ChainInfo,
   EdgeToggles,
   GraphMode,
   GraphNode,
@@ -23,8 +24,6 @@ const DEFAULT_EDGES: EdgeToggles = {
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
-  const [chains, setChains] = useState<ChainInfo[]>([])
-  const [defaultChainKey, setDefaultChainKey] = useState('')
   // Empty until /v1/chains resolves — avoids a hardcoded default double-fetch.
   const [selectedChains, setSelectedChains] = useState<string[]>([])
   const [thoughts, setThoughts] = useState<Thought[]>([])
@@ -34,6 +33,7 @@ export default function App() {
 
   const [search, setSearch] = useState('')
   const [selectedTypes, setSelectedTypes] = useState<Set<string> | null>(null)
+  const [chainFilter, setChainFilter] = useState<Set<string> | null>(null)
   const [edgeToggles, setEdgeToggles] = useState<EdgeToggles>(DEFAULT_EDGES)
   const [graphMode, setGraphMode] = useState<GraphMode>('2d')
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -46,8 +46,6 @@ export default function App() {
       try {
         const res = await listChains()
         if (cancelled) return
-        setChains(res.chains)
-        setDefaultChainKey(res.default_chain_key)
         setSelectedChains(res.chain_keys)
       } catch (err) {
         if (!cancelled) {
@@ -118,13 +116,26 @@ export default function App() {
     [thoughts, edgeToggles],
   )
 
+  const typeOptions = useMemo(
+    () =>
+      facetOptions(thoughts, (t) => t.thought_type, (value) =>
+        colorForThoughtType(value, theme),
+      ),
+    [thoughts, theme],
+  )
+  const chainOptions = useMemo(
+    () => facetOptions(thoughts, (t) => t.chain_key || 'unknown'),
+    [thoughts],
+  )
+
   const visibleGraph = useMemo(
     () =>
       filterGraph(fullGraph, {
-        thoughtTypes: selectedTypes,
+        types: selectedTypes,
+        chains: chainFilter,
         search,
       }),
-    [fullGraph, selectedTypes, search],
+    [fullGraph, selectedTypes, chainFilter, search],
   )
 
   const nodesById = useMemo(() => {
@@ -195,13 +206,13 @@ export default function App() {
 
       <div className="app-body">
         <aside className="sidebar">
-          <ChainPicker
-            chains={chains}
-            selected={selectedChains}
-            defaultChainKey={defaultChainKey}
-            disabled={loading}
-            onChange={setSelectedChains}
-            onLoadAll={() => setSelectedChains(chains.map((c) => c.chain_key))}
+          <Explorer
+            typeOptions={typeOptions}
+            chainOptions={chainOptions}
+            selectedTypes={selectedTypes}
+            chainFilter={chainFilter}
+            onTypesChange={setSelectedTypes}
+            onChainFilterChange={setChainFilter}
           />
         </aside>
 

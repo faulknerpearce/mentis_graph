@@ -155,7 +155,8 @@ describe('filterGraph', () => {
 
   it('filters by thought type', () => {
     const filtered = filterGraph(base, {
-      thoughtTypes: new Set(['Question']),
+      types: new Set(['Question']),
+      chains: null,
       search: '',
     })
     expect(filtered.nodes.map((n) => n.id)).toEqual(['q1'])
@@ -163,10 +164,39 @@ describe('filterGraph', () => {
 
   it('filters by search across content and tags', () => {
     const filtered = filterGraph(base, {
-      thoughtTypes: null,
+      types: null,
+      chains: null,
       search: 'release',
     })
     expect(filtered.nodes.map((n) => n.id)).toEqual(['d1'])
+  })
+
+  it('filters by chain', () => {
+    const multi = buildGraph(
+      [
+        thought({
+          id: 'a1',
+          index: 1,
+          chain_key: 'alpha',
+          thought_type: 'Decision',
+          content: 'Alpha thought',
+        }),
+        thought({
+          id: 'b1',
+          index: 1,
+          chain_key: 'beta',
+          thought_type: 'Decision',
+          content: 'Beta thought',
+        }),
+      ],
+      ALL_EDGES,
+    )
+    const filtered = filterGraph(multi, {
+      types: null,
+      chains: new Set(['beta']),
+      search: '',
+    })
+    expect(filtered.nodes.map((n) => n.id)).toEqual(['b1'])
   })
 })
 
