@@ -1,6 +1,7 @@
 import type {
   EdgeToggles,
   GraphData,
+  GraphFilters,
   GraphLink,
   GraphNode,
   RelationKind,
@@ -170,21 +171,18 @@ export function buildGraph(
   return { nodes, links }
 }
 
-export function filterGraph(
-  data: GraphData,
-  opts: {
-    thoughtTypes: Set<string> | null
-    search: string
-  },
-): GraphData {
+export function filterGraph(data: GraphData, opts: GraphFilters): GraphData {
   const query = opts.search.trim().toLowerCase()
 
   const nodes = data.nodes.filter((node) => {
-    if (opts.thoughtTypes && !opts.thoughtTypes.has(node.thoughtType)) {
+    const t = node.thought
+    if (opts.types && !opts.types.has(node.thoughtType)) {
+      return false
+    }
+    if (opts.chains && !opts.chains.has(t.chain_key || 'unknown')) {
       return false
     }
     if (!query) return true
-    const t = node.thought
     return (
       node.label.toLowerCase().includes(query) ||
       node.title.toLowerCase().includes(query) ||
