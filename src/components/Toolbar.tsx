@@ -1,5 +1,6 @@
 import type { EdgeToggles, GraphMode } from '../types'
-import { TYPE_COLORS } from '../graph/buildGraph'
+import { colorForThoughtType } from '../theme/palette'
+import type { Theme } from '../hooks/useTheme'
 
 interface ToolbarProps {
   search: string
@@ -17,6 +18,7 @@ interface ToolbarProps {
   linkCount: number
   onReload: () => void
   onResetLayout: () => void
+  theme: Theme
 }
 
 export function Toolbar({
@@ -35,10 +37,12 @@ export function Toolbar({
   linkCount,
   onReload,
   onResetLayout,
+  theme,
 }: ToolbarProps) {
   const toggleType = (type: string) => {
     if (selectedTypes === null) {
-      onTypesChange(new Set([type]))
+      // All types active → turn this one off (keep the rest).
+      onTypesChange(new Set(thoughtTypes.filter((t) => t !== type)))
       return
     }
     const next = new Set(selectedTypes)
@@ -47,15 +51,16 @@ export function Toolbar({
     } else {
       next.add(type)
     }
+    // Empty selection means "all types" again.
     onTypesChange(next.size === 0 ? null : next)
   }
 
   return (
     <div className="toolbar">
       <div className="toolbar-row">
-        <div className="stats" style={{ fontWeight: 650, color: 'var(--text)' }}>
-          Thought graph
-          <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: '0.55rem' }}>
+        <div className="stats">
+          <span className="stats-title">Graph</span>
+          <span className="stats-meta">
             {progress ? progress : `${nodeCount} nodes · ${linkCount} links`}
           </span>
         </div>
@@ -139,7 +144,7 @@ export function Toolbar({
               type="button"
               className={`type-chip${active ? ' active' : ''}`}
               style={{
-                ['--chip-color' as string]: TYPE_COLORS[type] ?? '#78716c',
+                ['--chip-color' as string]: colorForThoughtType(type, theme),
               }}
               onClick={() => toggleType(type)}
             >
