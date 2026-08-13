@@ -3,53 +3,8 @@ import type {
   GraphData,
   GraphLink,
   GraphNode,
-  RelationKind,
   Thought,
 } from '../types'
-
-/** Saturated accents that read well on cream (cabinet-style) and dark canvases. */
-const TYPE_COLORS: Record<string, string> = {
-  Decision: '#3b82f6',
-  LessonLearned: '#22c55e',
-  Correction: '#ef4444',
-  AssumptionInvalidated: '#f97316',
-  Constraint: '#a855f7',
-  Summary: '#64748b',
-  Checkpoint: '#78716c',
-  Plan: '#0ea5e9',
-  Subgoal: '#38bdf8',
-  TaskComplete: '#10b981',
-  Question: '#eab308',
-  Wonder: '#f59e0b',
-  Hypothesis: '#8b5cf6',
-  StateSnapshot: '#14b8a6',
-  Mistake: '#dc2626',
-  LLMExtracted: '#94a3b8',
-}
-
-const RELATION_COLORS: Record<string, string> = {
-  CausedBy: '#f59e0b',
-  Corrects: '#ef4444',
-  Invalidates: '#dc2626',
-  Supersedes: '#e11d48',
-  DerivedFrom: '#3b82f6',
-  Summarizes: '#78716c',
-  References: '#a8a29e',
-  Supports: '#22c55e',
-  ContinuesFrom: '#0ea5e9',
-  BranchesFrom: '#a855f7',
-}
-
-const REF_COLOR = 'rgba(120, 113, 108, 0.35)'
-const SPINE_COLOR = 'rgba(120, 113, 108, 0.18)'
-
-export function colorForThoughtType(thoughtType: string): string {
-  return TYPE_COLORS[thoughtType] ?? '#78716c'
-}
-
-export function colorForRelation(kind: RelationKind): string {
-  return RELATION_COLORS[kind] ?? '#a8a29e'
-}
 
 function firstLineTitle(content: string): string {
   const line =
@@ -68,19 +23,25 @@ export function nodeLabel(thought: Thought): string {
   return `#${thought.index} · ${thought.thought_type}`
 }
 
+function hashKey(chainKey: string, hash: string): string {
+  return `${chainKey}::${hash}`
+}
+
 export function buildGraph(
   thoughts: Thought[],
   toggles: EdgeToggles,
 ): GraphData {
   const byId = new Map<string, Thought>()
   const byChainIndex = new Map<string, Thought>()
+  // Scoped by chain so identical hashes in different chains cannot cross-wire.
   const byHash = new Map<string, Thought>()
 
   for (const thought of thoughts) {
+    const chainKey = thought.chain_key ?? ''
     byId.set(thought.id, thought)
-    byChainIndex.set(`${thought.chain_key ?? ''}::${thought.index}`, thought)
+    byChainIndex.set(`${chainKey}::${thought.index}`, thought)
     if (thought.hash) {
-      byHash.set(thought.hash, thought)
+      byHash.set(hashKey(chainKey, thought.hash), thought)
     }
   }
 
@@ -113,7 +74,7 @@ export function buildGraph(
           target: rel.target_id,
           kind: 'relation',
           relationKind: rel.kind,
-          color: colorForRelation(rel.kind),
+          color: '',
           label: rel.kind,
         })
       }
@@ -128,21 +89,21 @@ export function buildGraph(
           source: thought.id,
           target: target.id,
           kind: 'ref',
-          color: REF_COLOR,
+          color: '',
           label: `ref #${refIndex}`,
         })
       }
     }
 
     if (toggles.spine && thought.prev_hash) {
-      const prev = byHash.get(thought.prev_hash)
+      const prev = byHash.get(hashKey(chainKey, thought.prev_hash))
       if (prev) {
         pushLink({
           id: `spine:${prev.id}->${thought.id}`,
           source: prev.id,
           target: thought.id,
           kind: 'spine',
-          color: SPINE_COLOR,
+          color: '',
           label: 'prev',
         })
       }
@@ -153,7 +114,10 @@ export function buildGraph(
     const title = firstLineTitle(thought.content)
     const connections = degree.get(thought.id) ?? 0
     const importance = thought.importance ?? 0.3
-    const size = Math.max(3.2, Math.min(14, 3.2 + connections * 0.7 + importance * 3))
+    const size = Math.max(
+      3.2,
+      Math.min(14, 3.2 + connections * 0.7 + importance * 3),
+    )
     return {
       id: thought.id,
       label: nodeLabel(thought),
@@ -161,7 +125,7 @@ export function buildGraph(
       thoughtType: thought.thought_type,
       chainKey: thought.chain_key ?? '',
       index: thought.index,
-      color: colorForThoughtType(thought.thought_type),
+      color: '',
       size,
       thought,
     }
@@ -214,4 +178,24 @@ export function filterGraph(
   return { nodes, links }
 }
 
-export { TYPE_COLORS, RELATION_COLORS }
+/** Neighbor id set for selection highlighting (includes the selected node). */
+export function neighborIdsFor(
+  selectedId: string | null,
+  links: GraphLink[],
+): Set<string> | null {
+  if (!selectedId) return null
+  const ids = new Set<string>([selectedId])
+  for (const link of links) {
+    const source =
+      typeof link.source === 'string'
+        ? link.source
+        : (link.source as { id?: string }).id
+    const target =
+      typeof link.target === 'string'
+        ? link.target
+        : (link.target as { id?: string }).id
+    if (source === selectedId && target) ids.add(target)
+    if (target === selectedId && source) ids.add(source)
+  }
+  return ids
+}

@@ -1,5 +1,6 @@
-import type { EdgeToggles } from '../types'
-import { TYPE_COLORS } from '../graph/buildGraph'
+import type { EdgeToggles, GraphMode } from '../types'
+import { colorForThoughtType } from '../theme/palette'
+import type { Theme } from '../hooks/useTheme'
 
 interface ToolbarProps {
   search: string
@@ -9,12 +10,15 @@ interface ToolbarProps {
   onTypesChange: (types: Set<string> | null) => void
   edgeToggles: EdgeToggles
   onEdgeTogglesChange: (toggles: EdgeToggles) => void
+  graphMode: GraphMode
+  onGraphModeChange: (mode: GraphMode) => void
   loading: boolean
   progress: string | null
   nodeCount: number
   linkCount: number
   onReload: () => void
   onResetLayout: () => void
+  theme: Theme
 }
 
 export function Toolbar({
@@ -25,16 +29,20 @@ export function Toolbar({
   onTypesChange,
   edgeToggles,
   onEdgeTogglesChange,
+  graphMode,
+  onGraphModeChange,
   loading,
   progress,
   nodeCount,
   linkCount,
   onReload,
   onResetLayout,
+  theme,
 }: ToolbarProps) {
   const toggleType = (type: string) => {
     if (selectedTypes === null) {
-      onTypesChange(new Set([type]))
+      // All types active → turn this one off (keep the rest).
+      onTypesChange(new Set(thoughtTypes.filter((t) => t !== type)))
       return
     }
     const next = new Set(selectedTypes)
@@ -43,15 +51,16 @@ export function Toolbar({
     } else {
       next.add(type)
     }
+    // Empty selection means "all types" again.
     onTypesChange(next.size === 0 ? null : next)
   }
 
   return (
     <div className="toolbar">
       <div className="toolbar-row">
-        <div className="stats" style={{ fontWeight: 650, color: 'var(--text)' }}>
-          Thought graph
-          <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: '0.55rem' }}>
+        <div className="stats">
+          <span className="stats-title">Graph</span>
+          <span className="stats-meta">
             {progress ? progress : `${nodeCount} nodes · ${linkCount} links`}
           </span>
         </div>
@@ -78,6 +87,19 @@ export function Toolbar({
         >
           Reset layout
         </button>
+        <div className="mode-toggle" role="group" aria-label="Graph mode">
+          {(['2d', '3d'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={`btn ghost${graphMode === mode ? ' active' : ''}`}
+              onClick={() => onGraphModeChange(mode)}
+              aria-pressed={graphMode === mode}
+            >
+              {mode.toUpperCase()}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="toolbar-row wrap">
@@ -122,7 +144,7 @@ export function Toolbar({
               type="button"
               className={`type-chip${active ? ' active' : ''}`}
               style={{
-                ['--chip-color' as string]: TYPE_COLORS[type] ?? '#78716c',
+                ['--chip-color' as string]: colorForThoughtType(type, theme),
               }}
               onClick={() => toggleType(type)}
             >

@@ -43,27 +43,33 @@ export function ChainPicker({
         </button>
       </div>
       <div className="chain-list">
-        {chains.map((chain) => {
-          const isDefault = chain.chain_key === defaultChainKey
-          return (
-            <label
-              key={chain.chain_key}
-              className={`chain-item${selectedSet.has(chain.chain_key) ? ' active' : ''}`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedSet.has(chain.chain_key)}
-                disabled={disabled}
-                onChange={() => toggle(chain.chain_key)}
-              />
-              <span className="chain-name">
-                {chain.chain_key}
-                {isDefault ? ' · default' : ''}
-              </span>
-              <span className="chain-count">{chain.thought_count}</span>
-            </label>
-          )
-        })}
+        {chains.length === 0 ? (
+          <p className="detail-empty-copy">No chains connected yet.</p>
+        ) : (
+          chains.map((chain) => {
+            const isDefault = chain.chain_key === defaultChainKey
+            return (
+              <label
+                key={chain.chain_key}
+                className={`chain-item${selectedSet.has(chain.chain_key) ? ' active' : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedSet.has(chain.chain_key)}
+                  disabled={disabled}
+                  onChange={() => toggle(chain.chain_key)}
+                />
+                <span className="chain-name">
+                  {chain.chain_key}
+                  {isDefault ? (
+                    <span className="chain-default"> · default</span>
+                  ) : null}
+                </span>
+                <span className="chain-count">{chain.thought_count}</span>
+              </label>
+            )
+          })
+        )}
       </div>
     </div>
   )
