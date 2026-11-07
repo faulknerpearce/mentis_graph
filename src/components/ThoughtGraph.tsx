@@ -7,108 +7,219 @@ import {
   useRef,
   useState,
 } from 'react'
-import { forceCollide } from 'd3-force-3d'
+import { forceCollide, forceX, forceY, forceZ } from 'd3-force-3d'
 import ForceGraph2D, {
   type ForceGraphMethods,
-  type NodeObject,
   type LinkObject,
+  type NodeObject,
 } from 'react-force-graph-2d'
-import type {
-  ForceGraphMethods as ForceGraph3DMethods,
-  NodeObject as NodeObject3D,
-  LinkObject as LinkObject3D,
-} from 'react-force-graph-3d'
+import type { ForceGraphMethods as ForceGraph3DMethods } from 'react-force-graph-3d'
 import type { Theme } from '../hooks/useTheme'
-import {
-  CANVAS,
-  colorizeGraph,
-  linkDashForKind,
-  linkWidthForKind,
-} from '../theme/palette'
-import type { GraphData, GraphLink, GraphMode, GraphNode } from '../types'
+import { linkEnd } from '../graph/buildGraph'
+import type { Anchor } from '../graph/layout'
+import { formatDate } from '../lib/format'
+import { CANVAS, CONTESTED_RING, linkWidth, withAlpha } from '../theme/palette'
+import type {
+  EdgeCategory,
+  GraphLink,
+  GraphMode,
+  LayoutMode,
+  MapData,
+  MapNode,
+} from '../types'
+import { Icon } from './Icon'
 
 const ForceGraph3D = lazy(() => import('react-force-graph-3d'))
 
+export interface FocusRequest {
+  id: string
+  nonce: number
+}
+
 interface ThoughtGraphProps {
-  data: GraphData
+  data: MapData
+  layout: LayoutMode
+  anchors: Map<string, Anchor>
   selectedId: string | null
-  /** Full-graph neighborhood for selection dimming; null when nothing selected. */
-  neighborIds: Set<string> | null
+  /** Nodes outside this set are dimmed; null dims nothing. */
+  highlight: Set<string> | null
   theme: Theme
-  onSelect: (node: GraphNode | null) => void
   mode: GraphMode
   resetKey: number
+  focus: FocusRequest | null
+  onSelect: (node: MapNode | null) => void
 }
 
-type FGNode = NodeObject<GraphNode>
-type FGLink = LinkObject<GraphNode, GraphLink>
-type SimNode = GraphNode & FGNode & { z?: number }
-type FGNode3D = NodeObject3D<GraphNode>
-type FGLink3D = LinkObject3D<GraphNode, GraphLink>
-type SimNode3D = GraphNode & FGNode3D
-
+type SimNode = MapNode & NodeObject & { z?: number }
+// The library cannot infer a node union, so it sees plain node objects and
+// callbacks cast back to SimNode.
+type FGData = { nodes: NodeObject[]; links: LinkObject[] }
 type Position = { x: number; y: number; z?: number }
+type Hover = { node: MapNode; x: number; y: number }
 
-/** Max pointer travel (px) still counted as a click, not a pan. */
-const CLICK_MOVE_TOLERANCE_PX = 6
-/** Extra screen-space radius (px) around each node for easier targeting. */
-const HIT_PADDING_PX = 12
-/** Minimum graph-space gap between rendered node circles. */
-const NODE_GAP = 4
-
-function resolveLinkEnd(ref: string | { id?: string } | undefined): string {
-  if (typeof ref === 'string') return ref
-  return ref?.id ?? ''
+interface TunableForce {
+  strength?: (value: number | ((item: never) => number)) => TunableForce
+  distance?: (value: number | ((item: never) => number)) => TunableForce
+  distanceMax?: (value: number) => TunableForce
 }
+
+type Physics = {
+  links: Record<EdgeCategory, { distance: number; strength: number }>
+  charge: { topic: number; thought: number; range: number }
+}
+
+/**
+ * How tightly each kind of connection holds thoughts together, per layout.
+ * References are drawn but never pull: there are too many of them, and they
+ * collapse any structure into a hairball. Values were tuned by simulating the
+ * real MentisDB data offline and measuring how close thoughts settle to their
+ * own topic compared with a random one.
+ */
+const PHYSICS: Record<LayoutMode, Physics> = {
+  // Each thought gathers tightly round its topic; sessions shape the inside
+  // of a cluster without dragging thoughts out of it.
+  topics: {
+    links: {
+      session: { distance: 16, strength: 0.2 },
+      lineage: { distance: 40, strength: 0.1 },
+      reasoning: { distance: 40, strength: 0.1 },
+      reference: { distance: 60, strength: 0 },
+      sequence: { distance: 30, strength: 0.1 },
+      topic: { distance: 18, strength: 1 },
+    },
+    charge: { topic: -2500, thought: -10, range: 180 },
+  },
+  // No topics here, so sessions and relations are the bonds that form shapes.
+  chains: {
+    links: {
+      session: { distance: 14, strength: 0.7 },
+      lineage: { distance: 36, strength: 0.3 },
+      reasoning: { distance: 36, strength: 0.3 },
+      reference: { distance: 60, strength: 0 },
+      sequence: { distance: 30, strength: 0.12 },
+      topic: { distance: 30, strength: 0 },
+    },
+    charge: { topic: 0, thought: -30, range: 300 },
+  },
+}
+
+/**
+ * Line strength per layout, relative to the palette. In the topic map, links
+ * that cut across clusters recede so the cluster shapes read first; they come
+ * back at full strength around a selected thought.
+ */
+const LINK_EMPHASIS: Record<LayoutMode, Partial<Record<EdgeCategory, number>>> = {
+  topics: { reference: 0.45, session: 0.35, sequence: 0.4, topic: 1.8 },
+  chains: {},
+}
+
+/** Zoom level at which each kind of label appears. */
+const LABEL_ZOOM = { topic: 0.7, focus: 1.6, thought: 2.4 }
+/** Region labels fade out once you are zoomed into the detail. */
+const CHAIN_LABEL_MAX_ZOOM = 2.2
+const MIN_LABELLED_CHAIN = 5
+
+const CLICK_MOVE_TOLERANCE_PX = 6
+const HIT_PADDING_PX = 8
+const ANCHOR_PULL = 0.02
+const CENTER_PULL = 0.012
+const FONT = '"Geist", "Inter", system-ui, sans-serif'
+/** Duration of the dim/undim crossfade when the highlight changes. */
+const FADE_MS = 260
+/**
+ * High damping keeps motion gliding rather than wobbling; a slow cool-down
+ * lets you watch the structure form (about ten seconds on load).
+ */
+const VELOCITY_DECAY = 0.45
+const ALPHA_DECAY = 0.011
+const COOLDOWN_TICKS = 640
+const COOLDOWN_MS = 40000
+/** Frame on the forming layout early, then again once it settles. */
+const EARLY_FIT_TICK = 45
+
+const easeOut = (t: number) => 1 - (1 - t) ** 3
 
 export function ThoughtGraph({
   data,
+  layout,
+  anchors,
   selectedId,
-  neighborIds,
+  highlight,
   theme,
-  onSelect,
   mode,
   resetKey,
+  focus,
+  onSelect,
 }: ThoughtGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const fgRef = useRef<ForceGraphMethods<FGNode, FGLink> | undefined>(undefined)
+  const fgRef = useRef<ForceGraphMethods | undefined>(undefined)
   const fg3dRef = useRef<ForceGraph3DMethods | undefined>(undefined)
-  // The library runs the d3-force simulation on its own node objects, so the
-  // input nodes never receive live x/y. Capture the rendered positions from
-  // the per-node paint callback into a map keyed by node id.
+  // Rendered positions keyed by node id, captured during paint, so hit-testing
+  // and data refreshes never depend on the library's internal node objects.
   const posRef = useRef(new Map<string, Position>())
   const nodesRef = useRef<SimNode[]>([])
+  const anchorsRef = useRef(anchors)
+  anchorsRef.current = anchors
   const lastResetKeyRef = useRef(resetKey)
+  const needsFitRef = useRef(true)
+  const ticksRef = useRef(0)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
 
   const [size, setSize] = useState({ width: 0, height: 0 })
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [hover, setHover] = useState<Hover | null>(null)
   const palette = CANVAS[theme]
+  const hoveredId = hover?.node.id ?? null
 
-  const themedData = useMemo(() => colorizeGraph(data, theme), [data, theme])
+  // Crossfade between the previous and current highlight instead of snapping.
+  const fadeRef = useRef<{ from: Set<string> | null; start: number }>({ from: null, start: 0 })
+  const prevHighlightRef = useRef(highlight)
+  const fadeProgressRef = useRef(1)
+  const [fading, setFading] = useState(false)
+  useEffect(() => {
+    if (prevHighlightRef.current === highlight) return
+    fadeRef.current = { from: prevHighlightRef.current, start: performance.now() }
+    prevHighlightRef.current = highlight
+    setFading(true)
+    const timer = window.setTimeout(() => setFading(false), FADE_MS + 60)
+    return () => window.clearTimeout(timer)
+  }, [highlight])
 
-  // Preserve simulation positions across data refreshes.
   const graphData = useMemo(() => {
     if (lastResetKeyRef.current !== resetKey) {
       posRef.current.clear()
       lastResetKeyRef.current = resetKey
+      needsFitRef.current = true
+      ticksRef.current = 0
+    }
+    const known = posRef.current
+    const neighbor = new Map<string, string>()
+    for (const link of data.links) {
+      const s = linkEnd(link.source)
+      const t = linkEnd(link.target)
+      if (known.has(t) && !known.has(s)) neighbor.set(s, t)
+      if (known.has(s) && !known.has(t)) neighbor.set(t, s)
     }
 
-    const nodes = themedData.nodes.map((n) => {
-      const pos = posRef.current.get(n.id)
-      return pos ? { ...n, ...pos } : ({ ...n } as SimNode)
-    }) as SimNode[]
-
+    // New nodes start beside a placed neighbour, else inside their region.
+    const spread = Math.sqrt(data.nodes.length) * 14
+    const nodes = data.nodes.map((n) => {
+      const pos = known.get(n.id) ?? known.get(neighbor.get(n.id) ?? '')
+      const anchor =
+        layout === 'chains' && n.kind === 'thought' ? anchorsRef.current.get(n.chainKey) : undefined
+      const jitter = (r: number) => (Math.random() - 0.5) * r
+      const radius = anchor?.radius ?? spread
+      const start = pos
+        ? { x: pos.x + jitter(16), y: pos.y + jitter(16), z: (pos.z ?? 0) + jitter(16) }
+        : { x: (anchor?.x ?? 0) + jitter(radius), y: (anchor?.y ?? 0) + jitter(radius), z: jitter(radius) }
+      return { ...n, ...(known.get(n.id) ?? start) } as SimNode
+    })
     nodesRef.current = nodes
-    return {
-      nodes,
-      links: themedData.links.map((l) => ({ ...l })),
-    }
-  }, [themedData, resetKey])
+    return { nodes, links: data.links.map((l) => ({ ...l })) }
+  }, [data, resetKey, layout])
 
-  // Keep node circles apart. Lazy 3D may mount after this effect first runs,
-  // so retry briefly until the engine ref is available.
+  // Shape the layout. Lazy 3D may mount after this effect first runs, so
+  // retry briefly until the engine ref is available.
   useEffect(() => {
     let cancelled = false
     let tries = 0
@@ -120,10 +231,30 @@ export function ThoughtGraph({
         if (tries++ < 90) requestAnimationFrame(attach)
         return
       }
-      const collision = forceCollide<SimNode>((node) =>
-        (node.size ?? 4.5) * 1.25 + NODE_GAP,
-      ).iterations(4)
-      fg.d3Force('collide', collision)
+      const anchorOf = (n: SimNode) =>
+        layout === 'chains' && n.kind === 'thought' ? anchorsRef.current.get(n.chainKey) : undefined
+      const pull = layout === 'chains' ? ANCHOR_PULL : CENTER_PULL
+      fg.d3Force('x', forceX<NodeObject>((n) => anchorOf(n as SimNode)?.x ?? 0).strength(pull))
+      fg.d3Force('y', forceY<NodeObject>((n) => anchorOf(n as SimNode)?.y ?? 0).strength(pull))
+      if (mode === '3d') fg.d3Force('z', forceZ<NodeObject>(0).strength(pull))
+      fg.d3Force('center', null)
+      const physics = PHYSICS[layout]
+      const charge = fg.d3Force('charge') as unknown as TunableForce | undefined
+      // Short-range repulsion: long-range pushes flatten everything into an even disk.
+      charge?.strength?.((n: SimNode) =>
+        n.kind === 'topic' ? physics.charge.topic : physics.charge.thought,
+      )
+      charge?.distanceMax?.(physics.charge.range)
+      const link = fg.d3Force('link') as unknown as TunableForce | undefined
+      link?.distance?.((l: GraphLink) => physics.links[l.category].distance)
+      link?.strength?.((l: GraphLink) => physics.links[l.category].strength)
+      fg.d3Force(
+        'collide',
+        forceCollide<NodeObject>((node) => {
+          const n = node as SimNode
+          return n.size + (n.kind === 'topic' ? 16 : 5)
+        }).iterations(2),
+      )
       fg.d3ReheatSimulation()
     }
 
@@ -131,42 +262,48 @@ export function ThoughtGraph({
     return () => {
       cancelled = true
     }
-  }, [graphData, mode])
+    // Forces persist across data updates (the library reheats gently on its
+    // own), so they are only rebuilt when the layout itself changes.
+  }, [mode, layout, resetKey])
 
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-
     const update = () => {
       const rect = el.getBoundingClientRect()
       const width = Math.floor(rect.width)
       const height = Math.floor(rect.height)
       setSize((prev) =>
-        prev.width === width && prev.height === height
-          ? prev
-          : { width, height },
+        prev.width === width && prev.height === height ? prev : { width, height },
       )
     }
-
     update()
     const observer = new ResizeObserver(update)
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
 
-  // Track whether the current gesture started on a node so pan cannot steal clicks.
+  useEffect(() => {
+    if (!focus) return
+    const pos = posRef.current.get(focus.id)
+    if (!pos) return
+    if (mode === '2d') {
+      const fg = fgRef.current
+      fg?.centerAt(pos.x, pos.y, 950)
+      fg?.zoom(Math.max(fg.zoom(), LABEL_ZOOM.thought), 950)
+      return
+    }
+    const fg = fg3dRef.current
+    if (!fg) return
+    const z = pos.z ?? 0
+    const ratio = 1 + 160 / Math.max(Math.hypot(pos.x, pos.y, z), 1)
+    fg.cameraPosition({ x: pos.x * ratio, y: pos.y * ratio, z: z * ratio }, { x: pos.x, y: pos.y, z }, 900)
+  }, [focus, mode])
+
   const pointerOnNodeRef = useRef(false)
 
-  const capture3dPositions = useCallback(() => {
-    for (const node of graphData.nodes) {
-      if (node.x != null && node.y != null && node.z != null) {
-        posRef.current.set(node.id, { x: node.x, y: node.y, z: node.z })
-      }
-    }
-  }, [graphData.nodes])
-
   const nodeAtClient = useCallback(
-    (clientX: number, clientY: number): GraphNode | null => {
+    (clientX: number, clientY: number): SimNode | null => {
       if (mode !== '2d') return null
       const fg = fgRef.current
       const canvas = containerRef.current?.querySelector('canvas')
@@ -178,17 +315,14 @@ export function ThoughtGraph({
       if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return null
 
       const { x, y } = fg.screen2GraphCoords(sx, sy)
-      const scale = Math.max(fg.zoom(), 0.15)
-      const pad = HIT_PADDING_PX / scale
-
+      const pad = HIT_PADDING_PX / Math.max(fg.zoom(), 0.15)
       let best: SimNode | null = null
       let bestDist = Infinity
       for (const node of nodesRef.current) {
         const pos = posRef.current.get(node.id)
         if (!pos) continue
         const dist = Math.hypot(pos.x - x, pos.y - y)
-        const hitR = (node.size ?? 4.5) + pad
-        if (dist <= hitR && dist < bestDist) {
+        if (dist <= node.size + pad && dist < bestDist) {
           bestDist = dist
           best = node
         }
@@ -198,23 +332,18 @@ export function ThoughtGraph({
     [mode],
   )
 
-  // Own click + hover handling — force-graph's pointer interaction fights pans.
+  // Own click + hover handling: force-graph's pointer interaction fights pans.
   useEffect(() => {
     const el = containerRef.current
-    if (!el) return
-    if (mode !== '2d') return
+    if (!el || mode !== '2d') return
 
     let down: { x: number; y: number; onNode: boolean } | null = null
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return
-      const hit = nodeAtClient(event.clientX, event.clientY)
-      pointerOnNodeRef.current = Boolean(hit)
-      down = {
-        x: event.clientX,
-        y: event.clientY,
-        onNode: Boolean(hit),
-      }
+      const onNode = Boolean(nodeAtClient(event.clientX, event.clientY))
+      pointerOnNodeRef.current = onNode
+      down = { x: event.clientX, y: event.clientY, onNode }
     }
 
     const onPointerUp = (event: PointerEvent) => {
@@ -223,21 +352,18 @@ export function ThoughtGraph({
       const startedOnNode = down.onNode
       down = null
       pointerOnNodeRef.current = false
-      // Pan/zoom gestures move further than this; ignore those.
-      // Always accept a click that started on a node (pan is disabled there).
       if (!startedOnNode && moved > CLICK_MOVE_TOLERANCE_PX) return
       onSelectRef.current(nodeAtClient(event.clientX, event.clientY))
     }
 
     const onPointerMove = (event: PointerEvent) => {
-      const hit = nodeAtClient(event.clientX, event.clientY)
-      setHoveredId(hit?.id ?? null)
+      if (down && !down.onNode) return
+      const node = nodeAtClient(event.clientX, event.clientY)
+      const rect = el.getBoundingClientRect()
+      setHover(node ? { node, x: event.clientX - rect.left, y: event.clientY - rect.top } : null)
     }
 
-    const onPointerLeave = () => {
-      setHoveredId(null)
-    }
-
+    const onPointerLeave = () => setHover(null)
     const onPointerCancel = () => {
       down = null
       pointerOnNodeRef.current = false
@@ -257,147 +383,278 @@ export function ThoughtGraph({
     }
   }, [nodeAtClient, mode])
 
-  const allowPan = useCallback((event: MouseEvent | TouchEvent) => {
-    // Block pan while interacting with a node so selection never shifts the camera.
-    if (pointerOnNodeRef.current) return false
-    if ('clientX' in event) {
-      return nodeAtClient(event.clientX, event.clientY) == null
-    }
-    const touch = event.touches[0] ?? event.changedTouches[0]
-    if (!touch) return true
-    return nodeAtClient(touch.clientX, touch.clientY) == null
-  }, [nodeAtClient])
+  const allowPan = useCallback(
+    (event: MouseEvent | TouchEvent) => {
+      if (pointerOnNodeRef.current) return false
+      const point = 'clientX' in event ? event : (event.touches[0] ?? event.changedTouches[0])
+      if (!point) return true
+      return nodeAtClient(point.clientX, point.clientY) == null
+    },
+    [nodeAtClient],
+  )
 
   const isDimmed = useCallback(
-    (id: string) => Boolean(neighborIds && !neighborIds.has(id)),
-    [neighborIds],
+    (id: string) => Boolean(highlight && !highlight.has(id)),
+    [highlight],
+  )
+
+  /** 0 = fully lit, 1 = fully dimmed, eased across the crossfade. */
+  const dimLevel = useCallback(
+    (id: string) => {
+      const target = highlight && !highlight.has(id) ? 1 : 0
+      const p = fadeProgressRef.current
+      if (p >= 1) return target
+      const from = fadeRef.current.from && !fadeRef.current.from.has(id) ? 1 : 0
+      return from + (target - from) * p
+    },
+    [highlight],
+  )
+
+  const markFrame = useCallback(() => {
+    const elapsed = performance.now() - fadeRef.current.start
+    fadeProgressRef.current = easeOut(Math.min(1, elapsed / FADE_MS))
+  }, [])
+
+  const drawLabel = useCallback(
+    (ctx: CanvasRenderingContext2D, text: string, x: number, y: number, scale: number, weight: number, px: number) => {
+      ctx.font = `${weight} ${px / scale}px ${FONT}`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'top'
+      ctx.lineJoin = 'round'
+      ctx.lineWidth = 3 / scale
+      ctx.strokeStyle = palette.labelHalo
+      ctx.strokeText(text, x, y)
+      ctx.fillStyle = palette.label
+      ctx.fillText(text, x, y)
+    },
+    [palette],
   )
 
   const paintNode = useCallback(
-    (node: FGNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+    (node: NodeObject, ctx: CanvasRenderingContext2D, scale: number) => {
       const n = node as SimNode
-      if (n.x != null && n.y != null) {
-        posRef.current.set(n.id, { x: n.x, y: n.y })
-      }
-      const isSelected = n.id === selectedId
-      const isHovered = n.id === hoveredId
-      const dimmed = isDimmed(n.id)
-      const radius = (n.size ?? 4.5) * (isSelected ? 1.22 : isHovered ? 1.1 : 1)
-      const label = isSelected ? `${n.label}` : n.label
-      const fontSize = Math.max(9.5 / globalScale, 2.2)
-      const fill = dimmed ? withAlpha(n.color, palette.dimOpacity) : n.color
+      const x = n.x ?? 0
+      const y = n.y ?? 0
+      posRef.current.set(n.id, { x, y })
 
-      if (isSelected || isHovered || radius > 7) {
+      const selected = n.id === selectedId
+      const hovered = n.id === hoveredId
+      const dim = dimLevel(n.id)
+      const dimmed = dim > 0.5
+      const fadeTo = (alpha: number) => alpha + (palette.dimAlpha - alpha) * dim
+
+      if (n.kind === 'topic') {
+        const alpha = fadeTo(1)
         ctx.beginPath()
-        ctx.arc(n.x ?? 0, n.y ?? 0, radius + (isSelected ? 3.2 : 2.2), 0, 2 * Math.PI)
-        ctx.fillStyle = withAlpha(
-          n.color,
-          isSelected
-            ? palette.haloSelected
-            : isHovered
-              ? palette.haloSelected * 0.7
-              : palette.haloLarge,
-        )
+        ctx.arc(x, y, n.size, 0, 2 * Math.PI)
+        ctx.fillStyle = withAlpha(n.color, 0.07 * alpha)
+        ctx.fill()
+        ctx.lineWidth = (selected || hovered ? 2 : 1.2) / scale
+        ctx.strokeStyle = withAlpha(n.color, alpha * (selected || hovered ? 0.9 : 0.45))
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.arc(x, y, 2.2, 0, 2 * Math.PI)
+        ctx.fillStyle = withAlpha(n.color, alpha * 0.9)
+        ctx.fill()
+        if (!dimmed && (scale >= LABEL_ZOOM.topic || selected)) {
+          drawLabel(ctx, n.title, x, y + n.size + 3 / scale, scale, 600, n.count > 40 ? 13 : 11.5)
+        }
+        return
+      }
+
+      const retired = n.status === 'retired'
+      const r = n.size * (selected ? 1.25 : hovered ? 1.12 : 1)
+      const alpha = fadeTo(retired ? 0.55 : 1)
+
+      if (n.versions.length > 0 && !retired) {
+        // Stacked rings behind the node: earlier versions folded into it.
+        const layers = Math.min(2, n.versions.length)
+        for (let i = layers; i >= 1; i--) {
+          ctx.beginPath()
+          ctx.arc(x + i * r * 0.32, y - i * r * 0.32, r, 0, 2 * Math.PI)
+          ctx.lineWidth = Math.max(0.5, r * 0.14)
+          ctx.strokeStyle = withAlpha(n.color, alpha * (0.5 - i * 0.14))
+          ctx.stroke()
+        }
+      }
+
+      if (!retired && dim < 1 && (r > 6 || selected || hovered)) {
+        ctx.beginPath()
+        ctx.arc(x, y, r * (selected ? 2.4 : 1.9), 0, 2 * Math.PI)
+        ctx.fillStyle = withAlpha(n.color, (selected ? 0.18 : 0.07) * (1 - dim))
         ctx.fill()
       }
 
       ctx.beginPath()
-      ctx.arc(n.x ?? 0, n.y ?? 0, radius, 0, 2 * Math.PI)
-      ctx.fillStyle = fill
-      ctx.fill()
+      ctx.arc(x, y, r, 0, 2 * Math.PI)
+      if (retired) {
+        ctx.setLineDash([1.6, 1.4])
+        ctx.lineWidth = Math.max(0.8, r * 0.28)
+        ctx.strokeStyle = withAlpha(n.color, alpha)
+        ctx.stroke()
+        ctx.setLineDash([])
+      } else {
+        ctx.fillStyle = withAlpha(n.color, alpha)
+        ctx.fill()
+      }
 
-      if (isSelected || isHovered) {
-        ctx.strokeStyle = isSelected
-          ? palette.selectedStroke
-          : withAlpha(palette.selectedStroke, 0.55)
-        ctx.lineWidth = (isSelected ? 1.6 : 1.2) / globalScale
+      if (n.status === 'contested' && !dimmed) {
+        ctx.beginPath()
+        ctx.arc(x, y, r + 1.6, 0, 2 * Math.PI)
+        ctx.lineWidth = 0.9
+        ctx.strokeStyle = withAlpha(CONTESTED_RING, 0.85)
         ctx.stroke()
       }
 
-      if (globalScale > 1.15 || isSelected) {
-        const fontSpec = palette.labelFont.replace(
-          '1em',
-          `${fontSize}px`,
-        )
-        ctx.font = fontSpec
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'top'
-        ctx.fillStyle = dimmed
-          ? withAlpha(palette.label, palette.dimOpacity)
-          : palette.label
-        ctx.fillText(label, n.x ?? 0, (n.y ?? 0) + radius + 1.5)
-        if (isSelected && n.title && globalScale > 0.9) {
-          const titleSize = Math.max(8.5 / globalScale, 2)
-          ctx.font = palette.labelFont.replace('1em', `${titleSize}px`)
-          ctx.fillStyle = withAlpha(palette.label, 0.75)
-          const title =
-            n.title.length > 42 ? `${n.title.slice(0, 40)}…` : n.title
-          ctx.fillText(title, n.x ?? 0, (n.y ?? 0) + radius + fontSize + 2.2)
-        }
+      if (selected || hovered) {
+        ctx.beginPath()
+        ctx.arc(x, y, r + 2.2 / scale + 1, 0, 2 * Math.PI)
+        ctx.lineWidth = 1.6 / scale
+        ctx.strokeStyle = withAlpha(palette.ring, selected ? 0.95 : 0.6)
+        ctx.stroke()
       }
+
+      const inFocus = Boolean(selectedId) && Boolean(highlight?.has(n.id))
+      const showLabel =
+        selected ||
+        (!dimmed && (scale >= LABEL_ZOOM.thought || (inFocus && scale >= LABEL_ZOOM.focus)))
+      if (!showLabel) return
+      const text = n.title.length > 44 ? `${n.title.slice(0, 42)}…` : n.title
+      drawLabel(ctx, text, x, y + r + 3 / scale, scale, selected ? 600 : 500, 11)
     },
-    [selectedId, hoveredId, palette, isDimmed],
+    [selectedId, hoveredId, dimLevel, palette, highlight, drawLabel],
   )
 
-  const resolveLinkStyle = useCallback(
+  const paintChainLabels = useCallback(
+    (ctx: CanvasRenderingContext2D, scale: number) => {
+      if (layout !== 'chains' || scale > CHAIN_LABEL_MAX_ZOOM) return
+      const bounds = new Map<string, { sx: number; n: number; top: number }>()
+      for (const node of nodesRef.current) {
+        if (node.kind !== 'thought') continue
+        const pos = posRef.current.get(node.id)
+        if (!pos) continue
+        const b = bounds.get(node.chainKey) ?? { sx: 0, n: 0, top: Infinity }
+        b.sx += pos.x
+        b.n += 1
+        b.top = Math.min(b.top, pos.y - node.size)
+        bounds.set(node.chainKey, b)
+      }
+      ctx.font = `600 ${12 / scale}px ${FONT}`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'bottom'
+      ctx.fillStyle = palette.chainLabel
+      for (const [chain, b] of bounds) {
+        if (b.n < MIN_LABELLED_CHAIN) continue
+        ctx.fillText(chain.toUpperCase(), b.sx / b.n, b.top - 10 / scale)
+      }
+    },
+    [palette, layout],
+  )
+
+
+  const touchesSelected = useCallback(
+    (link: GraphLink) =>
+      Boolean(selectedId) &&
+      (linkEnd(link.source) === selectedId || linkEnd(link.target) === selectedId),
+    [selectedId],
+  )
+
+  const resolveLinkColor = useCallback(
     (link: object) => {
       const l = link as GraphLink
-      const source = resolveLinkEnd(l.source)
-      const target = resolveLinkEnd(l.target)
-      const base = l.color || palette.linkFallback
-      const dimmed =
-        Boolean(neighborIds) &&
-        !neighborIds!.has(source) &&
-        !neighborIds!.has(target)
-      return {
-        color: dimmed ? withAlpha(base, palette.dimOpacity * 0.85) : base,
-        width: linkWidthForKind(l.kind),
-        dash: linkDashForKind(l.kind),
-      }
+      if (touchesSelected(l)) return withAlpha(l.color, 0.9)
+      const dim = Math.max(dimLevel(linkEnd(l.source)), dimLevel(linkEnd(l.target)))
+      const base = Math.min(0.9, palette.linkAlpha[l.category] * (LINK_EMPHASIS[layout][l.category] ?? 1))
+      return withAlpha(l.color, base + (0.03 - base) * dim)
     },
-    [neighborIds, palette],
+    [dimLevel, touchesSelected, palette, layout],
   )
 
+  const resolveLinkWidth = useCallback(
+    (link: object) => {
+      const l = link as GraphLink
+      return linkWidth(l) * (touchesSelected(l) ? 2.2 : 1)
+    },
+    [touchesSelected],
+  )
+
+  const fitView = useCallback(
+    (ms: number) => {
+      if (mode === '2d') fgRef.current?.zoomToFit(ms, 60)
+      else fg3dRef.current?.zoomToFit(ms, 60)
+    },
+    [mode],
+  )
+
+  const handleEngineTick = useCallback(() => {
+    if (needsFitRef.current && ++ticksRef.current === EARLY_FIT_TICK) fitView(1600)
+  }, [fitView])
+
+  const handleEngineStop = useCallback(() => {
+    if (!needsFitRef.current) return
+    needsFitRef.current = false
+    ticksRef.current = 0
+    fitView(1400)
+  }, [fitView])
+
+  const zoomBy = (factor: number) => {
+    const fg = fgRef.current
+    if (mode === '2d' && fg) fg.zoom(fg.zoom() * factor, 450)
+  }
+
+  const fit = () => {
+    if (mode === '2d') fgRef.current?.zoomToFit(900, 60)
+    else fg3dRef.current?.zoomToFit(900, 60)
+  }
+
   return (
-    <div
-      className={`graph-canvas${hoveredId ? ' is-hovering-node' : ''}`}
-      ref={containerRef}
-    >
+    <div className={`graph-canvas${hover ? ' is-hovering-node' : ''}`} ref={containerRef}>
       {size.width > 0 &&
         (mode === '3d' ? (
-          <Suspense
-            fallback={<div className="graph-loading">Loading 3D graph…</div>}
-          >
+          <Suspense fallback={<div className="graph-loading">Loading 3D view…</div>}>
             <ForceGraph3D
               ref={fg3dRef}
               width={size.width}
               height={size.height}
               graphData={graphData}
               nodeId="id"
-              linkSource="source"
-              linkTarget="target"
               backgroundColor={palette.background}
-              nodeRelSize={3}
-              nodeVal={(node) => (node as SimNode3D).size}
-              nodeColor={(node) => {
-                const n = node as SimNode3D
-                return isDimmed(n.id)
-                  ? withAlpha(n.color, palette.dimOpacity)
-                  : n.color
+              showNavInfo={false}
+              nodeRelSize={1.6}
+              nodeResolution={10}
+              nodeVal={(node) => {
+                const n = node as SimNode
+                return (n.size * (n.id === selectedId ? 1.6 : 1)) ** 2 / 4
               }}
-              nodeLabel={(node) => (node as SimNode3D).title}
-              linkLabel={(link) => (link as FGLink3D).label}
-              linkColor={(link) => resolveLinkStyle(link).color}
-              linkWidth={(link) => resolveLinkStyle(link).width}
-              linkDirectionalArrowLength={3.2}
-              linkDirectionalArrowRelPos={1}
+              nodeColor={(node) => {
+                const n = node as SimNode
+                if (isDimmed(n.id)) return withAlpha(n.color, palette.dimAlpha)
+                if (n.kind === 'topic') return withAlpha(n.color, 0.35)
+                return n.status === 'retired' ? withAlpha(n.color, 0.35) : n.color
+              }}
+              nodeOpacity={0.92}
+              nodeLabel={(node) => tooltipHtml(node as SimNode)}
+              linkColor={resolveLinkColor}
+              linkWidth={(link) => (touchesSelected(link as GraphLink) ? 1.2 : 0)}
+              linkDirectionalParticles={(link) => (touchesSelected(link as GraphLink) ? 3 : 0)}
+              linkDirectionalParticleWidth={1.6}
+              linkDirectionalParticleSpeed={0.006}
               enableNodeDrag={false}
-              enablePointerInteraction
-              onNodeClick={(node) => onSelect(node as GraphNode)}
+              onNodeClick={(node) => onSelect(node as SimNode)}
               onBackgroundClick={() => onSelect(null)}
-              onEngineTick={capture3dPositions}
-              cooldownTicks={220}
-              d3VelocityDecay={0.35}
+              onEngineTick={() => {
+                handleEngineTick()
+                for (const n of graphData.nodes) {
+                  if (n.x != null && n.y != null) {
+                    posRef.current.set(n.id, { x: n.x, y: n.y, z: n.z ?? 0 })
+                  }
+                }
+              }}
+              onEngineStop={handleEngineStop}
+              cooldownTicks={COOLDOWN_TICKS}
+              cooldownTime={COOLDOWN_MS}
+              d3VelocityDecay={VELOCITY_DECAY}
+              d3AlphaDecay={ALPHA_DECAY}
             />
           </Suspense>
         ) : (
@@ -405,49 +662,102 @@ export function ThoughtGraph({
             ref={fgRef}
             width={size.width}
             height={size.height}
-            graphData={graphData}
+            graphData={graphData as FGData}
             nodeId="id"
-            linkSource="source"
-            linkTarget="target"
-            backgroundColor={palette.background}
+            backgroundColor="rgba(0,0,0,0)"
             nodeCanvasObjectMode={() => 'replace'}
             nodeCanvasObject={paintNode}
-            linkColor={(link) => resolveLinkStyle(link).color}
-            linkWidth={(link) => resolveLinkStyle(link).width}
-            linkLineDash={(link) => resolveLinkStyle(link).dash}
-            linkDirectionalArrowLength={(link) =>
-              (link as GraphLink).kind === 'spine' ? 1.6 : 2.6
-            }
-            linkDirectionalArrowRelPos={1}
+            onRenderFramePre={markFrame}
+            onRenderFramePost={paintChainLabels}
+            autoPauseRedraw={!fading}
+            linkColor={resolveLinkColor}
+            linkWidth={resolveLinkWidth}
+            linkCurvature={(link) => ((link as GraphLink).category === 'lineage' ? 0.18 : 0)}
+            linkDirectionalArrowLength={(link) => (touchesSelected(link as GraphLink) ? 3.4 : 0)}
+            linkDirectionalArrowRelPos={0.92}
+            linkDirectionalParticles={(link) => (touchesSelected(link as GraphLink) ? 2 : 0)}
+            linkDirectionalParticleWidth={2.2}
+            linkDirectionalParticleSpeed={0.008}
+            linkDirectionalParticleColor={(link) => (link as GraphLink).color}
             enableNodeDrag={false}
             enablePointerInteraction={false}
             enablePanInteraction={allowPan}
-            cooldownTicks={220}
-            d3VelocityDecay={0.35}
+            onEngineTick={handleEngineTick}
+            onEngineStop={handleEngineStop}
+            cooldownTicks={COOLDOWN_TICKS}
+            cooldownTime={COOLDOWN_MS}
+            d3VelocityDecay={VELOCITY_DECAY}
+            d3AlphaDecay={ALPHA_DECAY}
+            minZoom={0.05}
+            maxZoom={12}
           />
         ))}
+
+      {hover && mode === '2d' && (
+        <div
+          className="hover-card"
+          style={{
+            transform: `translate(${Math.min(hover.x + 16, size.width - 300)}px, ${hover.y + 16}px)`,
+          }}
+        >
+          <HoverCard node={hover.node} />
+        </div>
+      )}
+
+      <div className="zoom-controls glass">
+        {mode === '2d' && (
+          <>
+            <button type="button" onClick={() => zoomBy(1.4)} aria-label="Zoom in" title="Zoom in">
+              <Icon name="plus" />
+            </button>
+            <button type="button" onClick={() => zoomBy(1 / 1.4)} aria-label="Zoom out" title="Zoom out">
+              <Icon name="minus" />
+            </button>
+          </>
+        )}
+        <button type="button" onClick={fit} aria-label="Fit to screen" title="Fit to screen">
+          <Icon name="fit" />
+        </button>
+      </div>
     </div>
   )
 }
 
-function withAlpha(color: string, alpha: number): string {
-  if (color.startsWith('rgba')) {
-    return color.replace(
-      /rgba\(([^)]+)\)/,
-      (_, inner: string) => {
-        const parts = inner.split(',').map((p) => p.trim())
-        return `rgba(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`
-      },
+function HoverCard({ node }: { node: MapNode }) {
+  if (node.kind === 'topic') {
+    return (
+      <>
+        <div className="hover-card-meta">Topic</div>
+        <div className="hover-card-title">{node.title}</div>
+        <div className="hover-card-foot">
+          {node.count} memories · {node.chains.length} {node.chains.length === 1 ? 'chain' : 'chains'}
+        </div>
+      </>
     )
   }
-  if (color.startsWith('rgb(')) {
-    const inner = color.slice(4, -1)
-    return `rgba(${inner}, ${alpha})`
-  }
-  const raw = color.replace('#', '')
-  if (raw.length !== 6) return color
-  const r = Number.parseInt(raw.slice(0, 2), 16)
-  const g = Number.parseInt(raw.slice(2, 4), 16)
-  const b = Number.parseInt(raw.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+  return (
+    <>
+      <div className="hover-card-meta">
+        <span className="dot" style={{ background: node.color }} />
+        {node.thoughtType}
+        <span className="sep">·</span>
+        {node.chainKey} #{node.index}
+      </div>
+      <div className="hover-card-title">{node.title}</div>
+      <div className="hover-card-foot">
+        {node.agent} · {formatDate(node.time)}
+        {node.versions.length > 0 && <span className="status-chip versions">v{node.versions.length + 1}</span>}
+        {node.status !== 'live' && <span className={`status-chip ${node.status}`}>{node.status}</span>}
+      </div>
+    </>
+  )
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+}
+
+function tooltipHtml(node: MapNode): string {
+  const meta = node.kind === 'topic' ? `Topic · ${node.count} memories` : `${node.thoughtType} · ${node.chainKey} #${node.index}`
+  return `<div class="hover-card in-3d"><div class="hover-card-meta">${escapeHtml(meta)}</div><div class="hover-card-title">${escapeHtml(node.title)}</div></div>`
 }
