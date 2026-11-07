@@ -1,62 +1,98 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listChains, loadThoughtsForChains } from './api/mentis'
-import { buildGraph, filterGraph, neighborIdsFor } from './graph/buildGraph'
-import { Explorer } from './components/Explorer'
-import { ThoughtGraph } from './components/ThoughtGraph'
-import { ThoughtContentModal } from './components/ThoughtContentModal'
-import { ThoughtDetail } from './components/ThoughtDetail'
-import { Toolbar } from './components/Toolbar'
+import { buildGraph, filterGraph, neighborIdsFor, searchNodes } from './graph/buildGraph'
+import { chainAnchors } from './graph/layout'
+import { buildTopicIndex, withTopics } from './graph/topics'
+import { FilterPanel } from './components/FilterPanel'
+import { Inspector } from './components/Inspector'
+import { ThoughtGraph, type FocusRequest } from './components/ThoughtGraph'
+import { Timeline } from './components/Timeline'
+import { TopicPanel } from './components/TopicPanel'
+import { TopBar } from './components/TopBar'
 import { useTheme } from './hooks/useTheme'
 import { facetOptions } from './lib/facets'
-import { colorForThoughtType } from './theme/palette'
+import {
+  CANVAS,
+  categoricalScale,
+  colorizeGraph,
+  familyColor,
+  nodeColorFn,
+  relationColor,
+  withAlpha,
+} from './theme/palette'
 import type {
+  ColorMode,
   EdgeToggles,
   GraphMode,
-  GraphNode,
+  LayoutMode,
+  MapNode,
+  RelationCategory,
   Thought,
+  TopicNode,
 } from './types'
 
-const DEFAULT_EDGES: EdgeToggles = {
-  relations: true,
-  refs: true,
-  spine: true,
+const ALL_EDGES: EdgeToggles = {
+  lineage: true,
+  reasoning: true,
+  reference: true,
+  session: true,
+  sequence: true,
+}
+
+/** Topics carry the structure in the topic map; chain strands only tangle it. */
+const LAYOUT_DEFAULTS: Record<LayoutMode, { sequence: boolean; color: ColorMode }> = {
+  topics: { sequence: false, color: 'chain' },
+  chains: { sequence: true, color: 'type' },
+}
+
+const EDGE_SAMPLE_KIND: Record<RelationCategory, string> = {
+  lineage: 'Supersedes',
+  reasoning: 'DerivedFrom',
+  reference: 'References',
+  session: 'SameSession',
+  sequence: 'Precedes',
 }
 
 export default function App() {
   const { theme, toggleTheme } = useTheme()
-  // Empty until /v1/chains resolves — avoids a hardcoded default double-fetch.
-  const [selectedChains, setSelectedChains] = useState<string[]>([])
+  const [chainKeys, setChainKeys] = useState<string[]>([])
   const [thoughts, setThoughts] = useState<Thought[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<string | null>(null)
 
   const [search, setSearch] = useState('')
-  const [selectedTypes, setSelectedTypes] = useState<Set<string> | null>(null)
-  const [chainFilter, setChainFilter] = useState<Set<string> | null>(null)
-  const [edgeToggles, setEdgeToggles] = useState<EdgeToggles>(DEFAULT_EDGES)
+  const [types, setTypes] = useState<Set<string> | null>(null)
+  const [chains, setChains] = useState<Set<string> | null>(null)
+  const [layout, setLayout] = useState<LayoutMode>('topics')
+  const [edges, setEdges] = useState<EdgeToggles>({
+    ...ALL_EDGES,
+    sequence: LAYOUT_DEFAULTS.topics.sequence,
+  })
+  const [showRetired, setShowRetired] = useState(false)
+  const [until, setUntil] = useState<number | null>(null)
+  const [colorMode, setColorMode] = useState<ColorMode>(LAYOUT_DEFAULTS.topics.color)
   const [graphMode, setGraphMode] = useState<GraphMode>('2d')
+  const [panelOpen, setPanelOpen] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [focus, setFocus] = useState<FocusRequest | null>(null)
   const [layoutResetKey, setLayoutResetKey] = useState(0)
   const loadGenRef = useRef(0)
 
   useEffect(() => {
     let cancelled = false
-    ;(async () => {
-      try {
-        const res = await listChains()
+    listChains()
+      .then((res) => {
+        if (!cancelled) setChainKeys(res.chain_keys)
+      })
+      .catch((err: unknown) => {
         if (cancelled) return
-        setSelectedChains(res.chain_keys)
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Failed to list MentisDB chains. Is the daemon running on :9472?',
-          )
-        }
-      }
-    })()
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to list MentisDB chains. Is the daemon running on :9472?',
+        )
+      })
     return () => {
       cancelled = true
     }
@@ -70,14 +106,22 @@ export default function App() {
     setLayoutResetKey((key) => key + 1)
     setLoading(true)
     setError(null)
-    setProgress('Starting…')
+    setProgress('Connecting to MentisDB…')
     setSelectedId(null)
+    let total = 0
+    let lastChain = ''
+    let chainBase = 0
     try {
       const loaded = await loadThoughtsForChains(
         keys,
         (count, chainKey) => {
           if (isCancelled()) return
-          setProgress(`Loaded ${count} from ${chainKey}…`)
+          if (chainKey !== lastChain) {
+            chainBase = total
+            lastChain = chainKey
+          }
+          total = chainBase + count
+          setProgress(`${total.toLocaleString()} memories · ${chainKey}`)
         },
         isCancelled,
       )
@@ -93,175 +137,312 @@ export default function App() {
     }
   }, [])
 
-  const handleEdgeTogglesChange = (next: EdgeToggles) => {
-    setEdgeToggles(next)
-  }
-
-  const resetLayout = () => {
-    setLayoutResetKey((key) => key + 1)
-  }
-
   useEffect(() => {
-    if (selectedChains.length === 0) return
-    void loadThoughts(selectedChains)
-  }, [selectedChains, loadThoughts])
+    void loadThoughts(chainKeys)
+  }, [chainKeys, loadThoughts])
 
-  const thoughtTypes = useMemo(() => {
-    const types = new Set(thoughts.map((t) => t.thought_type))
-    return [...types].sort()
-  }, [thoughts])
+  const fullGraph = useMemo(() => buildGraph(thoughts), [thoughts])
 
-  const fullGraph = useMemo(
-    () => buildGraph(thoughts, edgeToggles),
-    [thoughts, edgeToggles],
+  const nodesById = useMemo(
+    () => new Map(fullGraph.nodes.map((node) => [node.id, node])),
+    [fullGraph.nodes],
   )
 
-  const typeOptions = useMemo(
+  const chainCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const node of fullGraph.nodes) {
+      counts.set(node.chainKey, (counts.get(node.chainKey) ?? 0) + 1)
+    }
+    return counts
+  }, [fullGraph.nodes])
+
+  const anchors = useMemo(() => chainAnchors(chainCounts), [chainCounts])
+
+  const chainColor = useMemo(
     () =>
-      facetOptions(thoughts, (t) => t.thought_type, (value) =>
-        colorForThoughtType(value, theme),
+      categoricalScale(
+        [...chainCounts.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k),
+        theme,
       ),
-    [thoughts, theme],
+    [chainCounts, theme],
   )
-  const chainOptions = useMemo(
-    () => facetOptions(thoughts, (t) => t.chain_key || 'unknown'),
-    [thoughts],
+
+  const agentOptionsRaw = useMemo(
+    () => facetOptions(fullGraph.nodes, (n) => n.agent),
+    [fullGraph.nodes],
+  )
+  const agentColor = useMemo(
+    () => categoricalScale(agentOptionsRaw.map((o) => o.value), theme),
+    [agentOptionsRaw, theme],
+  )
+
+  const colorOf = useMemo(
+    () => nodeColorFn(colorMode, theme, chainColor, agentColor),
+    [colorMode, theme, chainColor, agentColor],
+  )
+
+  // Status filter only: drives facet counts so they match what can be shown.
+  const statusScoped = useMemo(
+    () =>
+      filterGraph(fullGraph, {
+        edges: ALL_EDGES,
+        showRetired,
+        types: null,
+        chains: null,
+        until: null,
+      }),
+    [fullGraph, showRetired],
+  )
+
+  // Every filter except time: feeds the timeline histogram.
+  const scoped = useMemo(
+    () => filterGraph(statusScoped, { edges: ALL_EDGES, showRetired: true, types, chains, until: null }),
+    [statusScoped, types, chains],
   )
 
   const visibleGraph = useMemo(
-    () =>
-      filterGraph(fullGraph, {
-        types: selectedTypes,
-        chains: chainFilter,
-        search,
-      }),
-    [fullGraph, selectedTypes, chainFilter, search],
+    () => filterGraph(scoped, { edges, showRetired: true, types: null, chains: null, until }),
+    [scoped, edges, until],
   )
 
-  const nodesById = useMemo(() => {
-    const map = new Map<string, GraphNode>()
-    // Prefer full graph so a selected thought stays resolvable even if filters hide it.
-    for (const node of fullGraph.nodes) map.set(node.id, node)
-    return map
+  const topicIndex = useMemo(() => buildTopicIndex(fullGraph.nodes), [fullGraph.nodes])
+
+  const mapData = useMemo(
+    () => (layout === 'topics' ? withTopics(visibleGraph, topicIndex) : visibleGraph),
+    [layout, visibleGraph, topicIndex],
+  )
+
+  const coloredGraph = useMemo(
+    () => colorizeGraph(mapData, theme, colorOf),
+    [mapData, theme, colorOf],
+  )
+
+  const searchResults = useMemo(
+    () => searchNodes(visibleGraph.nodes, search),
+    [visibleGraph.nodes, search],
+  )
+
+  const highlight = useMemo(() => {
+    if (selectedId) return neighborIdsFor(selectedId, mapData.links)
+    if (searchResults) return new Set(searchResults.map((n) => n.id))
+    return null
+  }, [selectedId, mapData.links, searchResults])
+
+  const typeOptions = useMemo(
+    () => facetOptions(statusScoped.nodes, (n) => n.thoughtType),
+    [statusScoped.nodes],
+  )
+  const chainOptions = useMemo(
+    () => facetOptions(statusScoped.nodes, (n) => n.chainKey, chainColor),
+    [statusScoped.nodes, chainColor],
+  )
+  const agentOptions = useMemo(
+    () => agentOptionsRaw.map((o) => ({ ...o, color: agentColor(o.value) })),
+    [agentOptionsRaw, agentColor],
+  )
+
+  const edgeCounts = useMemo(() => {
+    const counts: Record<RelationCategory, number> = {
+      lineage: 0,
+      reasoning: 0,
+      reference: 0,
+      session: 0,
+      sequence: 0,
+    }
+    for (const link of scoped.links) {
+      if (link.category !== 'topic') counts[link.category] += 1
+    }
+    return counts
+  }, [scoped.links])
+
+  const statusCounts = useMemo(() => {
+    let retired = 0
+    let contested = 0
+    for (const node of fullGraph.nodes) {
+      if (node.status === 'retired') retired += 1
+      else if (node.status === 'contested') contested += 1
+    }
+    return { retired, contested }
   }, [fullGraph.nodes])
 
+  const times = useMemo(() => scoped.nodes.map((n) => n.time), [scoped.nodes])
+
   const selectedNode = selectedId ? (nodesById.get(selectedId) ?? null) : null
-
-  // Always full-graph neighbors so dimming matches the detail panel.
-  const selectionNeighborIds = useMemo(
-    () => neighborIdsFor(selectedId, fullGraph.links),
-    [selectedId, fullGraph.links],
+  const selectedTopic = useMemo(
+    () =>
+      (coloredGraph.nodes.find((n) => n.kind === 'topic' && n.id === selectedId) as
+        | TopicNode
+        | undefined) ?? null,
+    [coloredGraph.nodes, selectedId],
   )
+  const topicMembers = useMemo(() => {
+    if (!selectedTopic) return []
+    return visibleGraph.nodes.filter((n) =>
+      topicIndex.byThought.get(n.id)?.includes(selectedTopic.title),
+    )
+  }, [selectedTopic, visibleGraph.nodes, topicIndex])
 
-  const handleSelect = (node: GraphNode | null) => {
-    setSelectedId(node?.id ?? null)
+  const changeLayout = (next: LayoutMode) => {
+    if (next === layout) return
+    setLayout(next)
+    setEdges((prev) => ({ ...prev, sequence: LAYOUT_DEFAULTS[next].sequence }))
+    setColorMode(LAYOUT_DEFAULTS[next].color)
+    setSelectedId(null)
+    setLayoutResetKey((key) => key + 1)
   }
 
-  return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div className="brand-mark">
-          <h1 className="brand-name">Mentis</h1>
-          <div className="brand-product">Thought Graph</div>
-          <p className="brand-tagline">
-            Memory chains and relations from MentisDB
-          </p>
-        </div>
-        <button
-          type="button"
-          className="theme-toggle"
-          onClick={toggleTheme}
-          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-          title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-        >
-          <svg
-            className="theme-toggle-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.75"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            {theme === 'light' ? (
-              <>
-                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-              </>
-            ) : (
-              <>
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-              </>
-            )}
-          </svg>
-        </button>
-      </header>
+  const focusOn = useCallback(
+    (id: string) => {
+      const node = nodesById.get(id)
+      if (!node) return
+      if (node.status === 'retired') setShowRetired(true)
+      if (until != null && node.time > until) setUntil(null)
+      if (types && !types.has(node.thoughtType)) setTypes(null)
+      if (chains && !chains.has(node.chainKey)) setChains(null)
+      setSelectedId(id)
+      setFocus((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }))
+    },
+    [nodesById, until, types, chains],
+  )
 
-      {error && (
-        <div className="banner error" role="alert">
-          {error}
-        </div>
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      const target = event.target as HTMLElement | null
+      if (target?.tagName === 'INPUT') return
+      setSelectedId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const initialLoad = loading && thoughts.length === 0
+
+  return (
+    <div
+      className={`app-shell${panelOpen ? ' panel-open' : ''}${selectedNode || selectedTopic ? ' inspector-open' : ''}`}
+    >
+      <div className="stage">
+        <ThoughtGraph
+          data={coloredGraph}
+          layout={layout}
+          anchors={anchors}
+          selectedId={selectedId}
+          highlight={highlight}
+          theme={theme}
+          mode={graphMode}
+          resetKey={layoutResetKey}
+          focus={focus}
+          onSelect={(node: MapNode | null) => setSelectedId(node?.id ?? null)}
+        />
+      </div>
+
+      <TopBar
+        search={search}
+        onSearchChange={setSearch}
+        results={searchResults}
+        colorOf={colorOf}
+        onPick={(node) => focusOn(node.id)}
+        layout={layout}
+        onLayoutChange={changeLayout}
+        mode={graphMode}
+        onModeChange={setGraphMode}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        loading={loading}
+        onReload={() => void loadThoughts(chainKeys)}
+        onResetLayout={() => setLayoutResetKey((key) => key + 1)}
+        panelOpen={panelOpen}
+        onTogglePanel={() => setPanelOpen((open) => !open)}
+      />
+
+      {panelOpen && (
+        <FilterPanel
+          colorMode={colorMode}
+          onColorModeChange={setColorMode}
+          familyColor={(family) => familyColor(family, theme)}
+          edgeColor={(category) =>
+            withAlpha(
+              relationColor(EDGE_SAMPLE_KIND[category], theme),
+              Math.max(0.5, CANVAS[theme].linkAlpha[category] * 2),
+            )
+          }
+          edgeCounts={edgeCounts}
+          edges={edges}
+          onEdgesChange={setEdges}
+          showRetired={showRetired}
+          onShowRetiredChange={setShowRetired}
+          retiredCount={statusCounts.retired}
+          contestedCount={statusCounts.contested}
+          chainOptions={chainOptions}
+          chains={chains}
+          onChainsChange={setChains}
+          typeOptions={typeOptions}
+          types={types}
+          onTypesChange={setTypes}
+          agentOptions={agentOptions}
+        />
       )}
 
-      <div className="app-body">
-        <aside className="sidebar">
-          <Explorer
-            typeOptions={typeOptions}
-            chainOptions={chainOptions}
-            selectedTypes={selectedTypes}
-            chainFilter={chainFilter}
-            onTypesChange={setSelectedTypes}
-            onChainFilterChange={setChainFilter}
-          />
-        </aside>
-
-        <main className="main-pane">
-          <Toolbar
-            search={search}
-            onSearchChange={setSearch}
-            thoughtTypes={thoughtTypes}
-            selectedTypes={selectedTypes}
-            onTypesChange={setSelectedTypes}
-            edgeToggles={edgeToggles}
-            onEdgeTogglesChange={handleEdgeTogglesChange}
-            graphMode={graphMode}
-            onGraphModeChange={setGraphMode}
-            loading={loading}
-            progress={progress}
-            nodeCount={visibleGraph.nodes.length}
-            linkCount={visibleGraph.links.length}
-            onReload={() => void loadThoughts(selectedChains)}
-            onResetLayout={resetLayout}
-            theme={theme}
-          />
-          <div className="graph-stage">
-            <ThoughtGraph
-              data={visibleGraph}
-              selectedId={selectedId}
-              neighborIds={selectionNeighborIds}
-              theme={theme}
-              onSelect={handleSelect}
-              mode={graphMode}
-              resetKey={layoutResetKey}
-            />
-            {selectedNode && (
-              <ThoughtContentModal
-                node={selectedNode}
-                onClose={() => setSelectedId(null)}
-              />
-            )}
-          </div>
-        </main>
-
-        <ThoughtDetail
+      {selectedNode && (
+        <Inspector
+          key={selectedNode.id}
           node={selectedNode}
           links={fullGraph.links}
           nodesById={nodesById}
-          onSelectNeighbor={setSelectedId}
+          colorOf={colorOf}
+          onSelect={focusOn}
           onClose={() => setSelectedId(null)}
         />
-      </div>
+      )}
+
+      {selectedTopic && (
+        <TopicPanel
+          key={selectedTopic.id}
+          topic={selectedTopic}
+          members={topicMembers}
+          colorOf={colorOf}
+          chainColor={chainColor}
+          onSelect={focusOn}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
+
+      <footer className="bottombar">
+        <div className="stats glass">
+          <strong>{visibleGraph.nodes.length.toLocaleString()}</strong> memories
+          <span className="sep" />
+          <strong>{visibleGraph.links.length.toLocaleString()}</strong> links
+          {layout === 'topics' && (
+            <>
+              <span className="sep" />
+              <strong>{(coloredGraph.nodes.length - visibleGraph.nodes.length).toLocaleString()}</strong> topics
+            </>
+          )}
+          {progress && !initialLoad && <span className="stats-progress">{progress}</span>}
+        </div>
+        <Timeline times={times} until={until} onChange={setUntil} />
+      </footer>
+
+      {error && (
+        <div className="toast error glass" role="alert">
+          <strong>Can't reach MentisDB</strong>
+          <span>{error}</span>
+          <button type="button" className="text-btn" onClick={() => void loadThoughts(chainKeys)}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {initialLoad && (
+        <div className="loader glass" role="status">
+          <div className="loader-orb" aria-hidden="true" />
+          <div>
+            <strong>Loading thought network</strong>
+            <span>{progress}</span>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
