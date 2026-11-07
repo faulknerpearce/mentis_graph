@@ -11,13 +11,7 @@ function readStoredTheme(): Theme {
   } catch {
     /* ignore */
   }
-  if (
-    typeof window !== 'undefined' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches
-  ) {
-    return 'dark'
-  }
-  return 'light'
+  return 'dark'
 }
 
 export function useTheme() {

@@ -3,9 +3,13 @@ import {
   buildGraph,
   filterGraph,
   neighborIdsFor,
-  nodeLabel,
+  searchNodes,
+  thoughtTitle,
 } from './buildGraph'
-import type { EdgeToggles, Thought } from '../types'
+import { chainAnchors } from './layout'
+import { buildTopicIndex, normalizeTopic, thoughtTopics, withTopics } from './topics'
+import { toggleFacet } from '../lib/facets'
+import type { GraphFilters, GraphLink, Thought } from '../types'
 
 function thought(partial: Partial<Thought> & Pick<Thought, 'id' | 'index'>): Thought {
   return {
@@ -13,7 +17,7 @@ function thought(partial: Partial<Thought> & Pick<Thought, 'id' | 'index'>): Tho
     prev_hash: partial.prev_hash ?? '',
     content: partial.content ?? `# Thought ${partial.index}`,
     thought_type: partial.thought_type ?? 'Decision',
-    role: partial.role ?? 'agent',
+    role: partial.role ?? 'Memory',
     tags: partial.tags ?? [],
     concepts: partial.concepts ?? [],
     refs: partial.refs ?? [],
@@ -25,178 +29,278 @@ function thought(partial: Partial<Thought> & Pick<Thought, 'id' | 'index'>): Tho
   }
 }
 
-const ALL_EDGES: EdgeToggles = {
-  relations: true,
-  refs: true,
-  spine: true,
+const SHOW_ALL: GraphFilters = {
+  edges: { lineage: true, reasoning: true, reference: true, session: true, sequence: true },
+  showRetired: true,
+  types: null,
+  chains: null,
+  until: null,
 }
 
-describe('nodeLabel', () => {
-  it('formats index and type', () => {
-    expect(nodeLabel(thought({ id: 'a', index: 3, thought_type: 'Plan' }))).toBe(
-      '#3 · Plan',
-    )
+function link(id: string, source: string, target: string): GraphLink {
+  return { id, source, target, category: 'reference', kind: 'References', color: '' }
+}
+
+describe('thoughtTitle', () => {
+  it('uses the first non-empty line without markdown markers', () => {
+    expect(thoughtTitle('\n## **Decision**: ship it\nbody')).toBe('Decision**: ship it')
+    expect(thoughtTitle('   ')).toBe('Untitled')
   })
 })
 
 describe('buildGraph', () => {
-  it('builds relation, ref, and spine edges', () => {
-    const thoughts = [
-      thought({
-        id: 't0',
-        index: 0,
-        hash: 'hash0',
-        content: 'Genesis',
-      }),
+  it('draws a ref once when a References relation already covers it', () => {
+    const graph = buildGraph([
+      thought({ id: 't0', index: 0, hash: 'hash0' }),
       thought({
         id: 't1',
         index: 1,
-        hash: 'hash1',
         prev_hash: 'hash0',
         refs: [0],
-        relations: [{ kind: 'DerivedFrom', target_id: 't0' }],
-        content: 'Child',
+        relations: [{ kind: 'References', target_id: 't0' }],
       }),
-    ]
-
-    const graph = buildGraph(thoughts, ALL_EDGES)
-    expect(graph.nodes).toHaveLength(2)
-    expect(graph.links.map((l) => l.kind).sort()).toEqual([
-      'ref',
-      'relation',
-      'spine',
+    ])
+    expect(graph.links.map((l) => `${l.category}:${l.kind}`).sort()).toEqual([
+      'reference:References',
+      'sequence:Precedes',
     ])
   })
 
-  it('does not cross-wire spine edges across chains with the same hash', () => {
-    const thoughts = [
-      thought({
-        id: 'a0',
-        index: 0,
-        chain_key: 'alpha',
-        hash: 'shared',
-        content: 'Alpha genesis',
-      }),
-      thought({
-        id: 'b0',
-        index: 0,
-        chain_key: 'beta',
-        hash: 'other',
-        content: 'Beta genesis',
-      }),
-      thought({
-        id: 'b1',
-        index: 1,
-        chain_key: 'beta',
-        hash: 'beta1',
-        prev_hash: 'shared',
-        content: 'Should not attach to alpha',
-      }),
-    ]
-
-    const graph = buildGraph(thoughts, {
-      relations: false,
-      refs: false,
-      spine: true,
-    })
-    expect(graph.links.filter((l) => l.kind === 'spine')).toHaveLength(0)
+  it('keeps bare positional refs that have no relation', () => {
+    const graph = buildGraph([
+      thought({ id: 't0', index: 0 }),
+      thought({ id: 't1', index: 1, refs: [0] }),
+    ])
+    expect(graph.links).toEqual([
+      expect.objectContaining({ source: 't1', target: 't0', category: 'reference' }),
+    ])
   })
 
-  it('scopes spine edges within a chain', () => {
-    const thoughts = [
+  it('categorises relations and derives memory status', () => {
+    const graph = buildGraph([
+      thought({ id: 'old', index: 0 }),
+      thought({ id: 'doubted', index: 1 }),
+      thought({ id: 'base', index: 2 }),
       thought({
-        id: 'a0',
-        index: 0,
-        chain_key: 'alpha',
-        hash: 'a-hash',
+        id: 'new',
+        index: 3,
+        relations: [
+          { kind: 'Supersedes', target_id: 'old' },
+          { kind: 'Contradicts', target_id: 'doubted' },
+          { kind: 'DerivedFrom', target_id: 'base' },
+        ],
       }),
-      thought({
-        id: 'a1',
-        index: 1,
-        chain_key: 'alpha',
-        hash: 'a-hash-1',
-        prev_hash: 'a-hash',
-      }),
-    ]
-    const graph = buildGraph(thoughts, {
-      relations: false,
-      refs: false,
-      spine: true,
-    })
-    expect(graph.links).toHaveLength(1)
-    expect(graph.links[0]).toMatchObject({
-      kind: 'spine',
-      source: 'a0',
-      target: 'a1',
-    })
+    ])
+    const byId = new Map(graph.nodes.map((n) => [n.id, n]))
+    expect(byId.get('old')).toMatchObject({ status: 'retired', successors: ['new'] })
+    expect(byId.get('doubted')?.status).toBe('contested')
+    expect(byId.get('base')?.status).toBe('live')
+    expect(byId.get('new')?.degree).toBe(3)
+    expect(graph.links.map((l) => l.category).sort()).toEqual([
+      'lineage',
+      'lineage',
+      'reasoning',
+    ])
+  })
+
+  it('does not count sequence edges towards degree', () => {
+    const graph = buildGraph([
+      thought({ id: 'a0', index: 0, hash: 'x' }),
+      thought({ id: 'a1', index: 1, prev_hash: 'x' }),
+    ])
+    expect(graph.nodes.map((n) => n.degree)).toEqual([0, 0])
+  })
+
+  it('does not cross-wire sequence edges across chains with the same hash', () => {
+    const graph = buildGraph([
+      thought({ id: 'a0', index: 0, chain_key: 'alpha', hash: 'shared' }),
+      thought({ id: 'b1', index: 1, chain_key: 'beta', prev_hash: 'shared' }),
+    ])
+    expect(graph.links).toHaveLength(0)
   })
 })
 
 describe('filterGraph', () => {
-  const base = buildGraph(
-    [
+  const base = buildGraph([
+    thought({ id: 'old', index: 0, timestamp: '2026-01-01T00:00:00Z' }),
+    thought({
+      id: 'new',
+      index: 1,
+      chain_key: 'beta',
+      thought_type: 'Question',
+      timestamp: '2026-03-01T00:00:00Z',
+      relations: [{ kind: 'Supersedes', target_id: 'old' }],
+    }),
+  ])
+
+  it('hides retired thoughts and their edges unless asked', () => {
+    const hidden = filterGraph(base, { ...SHOW_ALL, showRetired: false })
+    expect(hidden.nodes.map((n) => n.id)).toEqual(['new'])
+    expect(hidden.links).toHaveLength(0)
+    expect(filterGraph(base, SHOW_ALL).links).toHaveLength(1)
+  })
+
+  it('filters edges by category', () => {
+    const noLineage = filterGraph(base, {
+      ...SHOW_ALL,
+      edges: { ...SHOW_ALL.edges, lineage: false },
+    })
+    expect(noLineage.nodes).toHaveLength(2)
+    expect(noLineage.links).toHaveLength(0)
+  })
+
+  it('filters by type, chain and time', () => {
+    const ids = (f: Partial<GraphFilters>) =>
+      filterGraph(base, { ...SHOW_ALL, ...f }).nodes.map((n) => n.id)
+    expect(ids({ types: new Set(['Question']) })).toEqual(['new'])
+    expect(ids({ chains: new Set(['main']) })).toEqual(['old'])
+    expect(ids({ until: Date.parse('2026-02-01T00:00:00Z') })).toEqual(['old'])
+  })
+})
+
+describe('versions, mentions and sessions', () => {
+  it('prefers the version state reported by MentisDB', () => {
+    const graph = buildGraph([
+      thought({ id: 'a', index: 0, version_status: 'contested' }),
+      thought({ id: 'b', index: 1, version_status: null }),
+    ])
+    expect(graph.nodes.map((n) => n.status)).toEqual(['contested', 'live'])
+  })
+
+  it('folds retired thoughts into their current version and redirects links', () => {
+    const graph = buildGraph([
+      thought({ id: 'v1', index: 0, timestamp: '2026-01-01T00:00:00Z' }),
       thought({
-        id: 'd1',
+        id: 'v2',
         index: 1,
-        thought_type: 'Decision',
-        content: 'Ship the feature',
-        tags: ['release'],
+        timestamp: '2026-01-02T00:00:00Z',
+        relations: [{ kind: 'Supersedes', target_id: 'v1' }],
       }),
       thought({
-        id: 'q1',
+        id: 'reader',
         index: 2,
-        thought_type: 'Question',
-        content: 'What about rollback?',
-        concepts: ['risk'],
+        timestamp: '2026-03-01T00:00:00Z',
+        relations: [{ kind: 'DerivedFrom', target_id: 'v1' }],
       }),
-    ],
-    ALL_EDGES,
-  )
+    ])
+    const v2 = graph.nodes.find((n) => n.id === 'v2')
+    expect(v2?.versions).toEqual(['v1'])
+    expect(graph.nodes.find((n) => n.id === 'v1')?.currentId).toBe('v2')
 
-  it('filters by thought type', () => {
-    const filtered = filterGraph(base, {
-      types: new Set(['Question']),
-      chains: null,
-      search: '',
-    })
-    expect(filtered.nodes.map((n) => n.id)).toEqual(['q1'])
+    const live = filterGraph(graph, { ...SHOW_ALL, showRetired: false, edges: { ...SHOW_ALL.edges, session: false, sequence: false } })
+    expect(live.links.map((l) => `${l.source}->${l.target}:${l.kind}`)).toEqual(['reader->v2:DerivedFrom'])
   })
 
-  it('filters by search across content and tags', () => {
-    const filtered = filterGraph(base, {
-      types: null,
-      chains: null,
-      search: 'release',
+  it('does not treat a bulk cleanup as the current version', () => {
+    const old = Array.from({ length: 10 }, (_, i) => thought({ id: `o${i}`, index: i }))
+    const cleanup = thought({
+      id: 'cleanup',
+      index: 10,
+      relations: old.map((o) => ({ kind: 'Supersedes', target_id: o.id })),
     })
-    expect(filtered.nodes.map((n) => n.id)).toEqual(['d1'])
+    const graph = buildGraph([...old, cleanup])
+    expect(graph.nodes.find((n) => n.id === 'cleanup')).toMatchObject({ archived: 10, versions: [] })
+    expect(graph.nodes.find((n) => n.id === 'o0')?.currentId).toBeNull()
   })
 
-  it('filters by chain', () => {
-    const multi = buildGraph(
-      [
-        thought({
-          id: 'a1',
-          index: 1,
-          chain_key: 'alpha',
-          thought_type: 'Decision',
-          content: 'Alpha thought',
-        }),
-        thought({
-          id: 'b1',
-          index: 1,
-          chain_key: 'beta',
-          thought_type: 'Decision',
-          content: 'Beta thought',
-        }),
-      ],
-      ALL_EDGES,
+  it('links #N mentions in the text unless a relation already does', () => {
+    const graph = buildGraph([
+      thought({ id: 'a', index: 7 }),
+      thought({ id: 'b', index: 8 }),
+      thought({
+        id: 'c',
+        index: 9,
+        content: 'Builds on #7 and #8, see also #404',
+        relations: [{ kind: 'Supports', target_id: 'b' }],
+      }),
+    ])
+    expect(graph.links.map((l) => `${l.target}:${l.kind}`).sort()).toEqual(['a:Mentions', 'b:Supports'])
+  })
+
+  it('groups bursts of work by the same agent into sessions', () => {
+    const graph = buildGraph([
+      thought({ id: 'a', index: 0, timestamp: '2026-01-01T10:00:00Z' }),
+      thought({ id: 'b', index: 1, timestamp: '2026-01-01T10:20:00Z' }),
+      thought({ id: 'c', index: 2, timestamp: '2026-01-01T15:00:00Z' }),
+      thought({ id: 'd', index: 3, timestamp: '2026-01-01T10:10:00Z', agent_id: 'other' }),
+    ])
+    const session = new Map(graph.nodes.map((n) => [n.id, n.session]))
+    expect(session.get('a')).toBe(session.get('b'))
+    expect(session.get('c')).not.toBe(session.get('a'))
+    expect(session.get('d')).not.toBe(session.get('a'))
+    const strands = filterGraph(graph, SHOW_ALL).links.filter((l) => l.category === 'session')
+    expect(strands.map((l) => `${l.source}->${l.target}`)).toEqual(['a->b'])
+  })
+})
+
+describe('topics', () => {
+  it('normalises tags and drops dates, stamps and generic labels', () => {
+    expect(normalizeTopic('Lit Protocol')).toBe('lit-protocol')
+    expect(normalizeTopic('aseryx_zk_server')).toBe('zk-server')
+    expect(normalizeTopic('2026-09-08')).toBeNull()
+    expect(normalizeTopic('july-2026')).toBeNull()
+    expect(normalizeTopic('verified:2026-11-07')).toBeNull()
+    expect(normalizeTopic('checkpoint')).toBeNull()
+  })
+
+  it("skips the thought's own chain name", () => {
+    expect(thoughtTopics(['zk-server', 'custody'], [], 'aseryx-zk-server')).toEqual(['custody'])
+  })
+
+  it('attaches thoughts to their most specific topics and builds hubs', () => {
+    const many = Array.from({ length: 6 }, (_, i) =>
+      thought({ id: `t${i}`, index: i, tags: i < 3 ? ['escrow', 'custody'] : ['custody'] }),
     )
-    const filtered = filterGraph(multi, {
-      types: null,
-      chains: new Set(['beta']),
-      search: '',
-    })
-    expect(filtered.nodes.map((n) => n.id)).toEqual(['b1'])
+    const graph = buildGraph(many)
+    const index = buildTopicIndex(graph.nodes, { minCount: 2, maxShare: 1, perThought: 1 })
+    expect(index.byThought.get('t0')).toEqual(['escrow'])
+    expect(index.byThought.get('t5')).toEqual(['custody'])
+
+    const map = withTopics(graph, index)
+    const hubs = map.nodes.filter((n) => n.kind === 'topic')
+    expect(hubs.map((h) => [h.title, h.kind === 'topic' && h.count])).toEqual([
+      ['escrow', 3],
+      ['custody', 3],
+    ])
+    expect(map.links.filter((l) => l.category === 'topic')).toHaveLength(6)
+  })
+})
+
+describe('sequence strands', () => {
+  it('bridges over hidden thoughts so a chain stays one strand', () => {
+    const graph = buildGraph([
+      thought({ id: 'a', index: 0, hash: 'ha' }),
+      thought({ id: 'b', index: 1, hash: 'hb', prev_hash: 'ha' }),
+      thought({
+        id: 'c',
+        index: 2,
+        prev_hash: 'hb',
+        relations: [{ kind: 'Supersedes', target_id: 'b' }],
+      }),
+      thought({ id: 'x', index: 0, chain_key: 'other' }),
+    ])
+    const strands = filterGraph(graph, { ...SHOW_ALL, showRetired: false }).links.filter(
+      (l) => l.category === 'sequence',
+    )
+    expect(strands.map((l) => `${l.source}->${l.target}`)).toEqual(['a->c'])
+  })
+})
+
+describe('searchNodes', () => {
+  const { nodes } = buildGraph([
+    thought({ id: 'd1', index: 12, content: 'Ship the feature', tags: ['release'] }),
+    thought({ id: 'q1', index: 2, content: 'What about rollback?', concepts: ['risk'] }),
+  ])
+
+  it('returns null for an empty query', () => {
+    expect(searchNodes(nodes, '  ')).toBeNull()
+  })
+
+  it('matches content, tags, concepts and #index', () => {
+    const ids = (q: string) => searchNodes(nodes, q)?.map((n) => n.id)
+    expect(ids('release')).toEqual(['d1'])
+    expect(ids('RISK')).toEqual(['q1'])
+    expect(ids('#12')).toEqual(['d1'])
   })
 })
 
@@ -205,33 +309,39 @@ describe('neighborIdsFor', () => {
     expect(neighborIdsFor(null, [])).toBeNull()
   })
 
-  it('includes the selected node and its neighbors', () => {
-    const ids = neighborIdsFor('a', [
-      {
-        id: '1',
-        source: 'a',
-        target: 'b',
-        kind: 'relation',
-        color: '',
-        label: 'DerivedFrom',
-      },
-      {
-        id: '2',
-        source: 'c',
-        target: 'a',
-        kind: 'ref',
-        color: '',
-        label: 'ref',
-      },
-      {
-        id: '3',
-        source: 'x',
-        target: 'y',
-        kind: 'spine',
-        color: '',
-        label: 'prev',
-      },
-    ])
+  it('includes the selected node and its neighbours', () => {
+    const ids = neighborIdsFor('a', [link('1', 'a', 'b'), link('2', 'c', 'a'), link('3', 'x', 'y')])
     expect(ids).toEqual(new Set(['a', 'b', 'c']))
+  })
+})
+
+describe('chainAnchors', () => {
+  it('places the largest chain at the centre and keeps regions apart', () => {
+    const anchors = chainAnchors(new Map([['small', 10], ['big', 400], ['mid', 100]]))
+    expect(anchors.get('big')).toMatchObject({ x: 0, y: 0 })
+    const list = [...anchors.values()]
+    for (const a of list) {
+      for (const b of list) {
+        if (a === b) continue
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.radius + b.radius)
+      }
+    }
+  })
+})
+
+describe('toggleFacet', () => {
+  const all = ['a', 'b', 'c']
+
+  it('deselects from the implicit all-selected state', () => {
+    expect(toggleFacet(null, ['a'], all)).toEqual(new Set(['b', 'c']))
+  })
+
+  it('returns null once everything is selected again', () => {
+    expect(toggleFacet(new Set(['b', 'c']), ['a'], all)).toBeNull()
+  })
+
+  it('toggles a group as one unit', () => {
+    expect(toggleFacet(new Set(['a']), ['a', 'b'], all)).toEqual(new Set(['a', 'b']))
+    expect(toggleFacet(null, ['a', 'b'], all)).toEqual(new Set(['c']))
   })
 })

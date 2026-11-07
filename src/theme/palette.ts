@@ -1,184 +1,182 @@
 import type { Theme } from '../hooks/useTheme'
-import type { GraphData, GraphLink, RelationKind } from '../types'
+import { OTHER_FAMILY } from '../graph/taxonomy'
+import type { ColorMode, EdgeCategory, GraphLink, GraphNode, MapData } from '../types'
 
 export interface CanvasPalette {
+  /** Solid fallback for the WebGL renderer; the 2D canvas is transparent. */
   background: string
   label: string
-  selectedStroke: string
-  linkFallback: string
-  dimOpacity: number
-  haloSelected: number
-  haloLarge: number
-  labelFont: string
+  labelHalo: string
+  chainLabel: string
+  ring: string
+  topic: string
+  dimAlpha: number
+  linkAlpha: Record<EdgeCategory, number>
 }
 
-const TYPE_COLORS_LIGHT: Record<string, string> = {
-  Decision: '#2f6fed',
-  LessonLearned: '#1a9a5c',
-  Correction: '#d64545',
-  AssumptionInvalidated: '#d97706',
-  Constraint: '#7c5cbf',
-  Summary: '#5b6570',
-  Checkpoint: '#6b7280',
-  Plan: '#0b8fbf',
-  Subgoal: '#2899c4',
-  TaskComplete: '#0d9a6e',
-  Question: '#b8860b',
-  Wonder: '#c27803',
-  Hypothesis: '#6d5bd0',
-  StateSnapshot: '#0f9a8a',
-  Mistake: '#c53030',
-  LLMExtracted: '#7a8494',
+export const CANVAS: Record<Theme, CanvasPalette> = {
+  dark: {
+    background: '#0e0e0f',
+    label: 'rgba(231, 227, 219, 0.9)',
+    labelHalo: 'rgba(14, 14, 15, 0.88)',
+    chainLabel: 'rgba(214, 208, 198, 0.3)',
+    ring: '#ece8e1',
+    topic: '#d9d4ca',
+    dimAlpha: 0.1,
+    linkAlpha: { lineage: 0.5, reasoning: 0.55, reference: 0.17, session: 0.42, sequence: 0.14, topic: 0.11 },
+  },
+  light: {
+    background: '#f4f2ee',
+    label: 'rgba(41, 37, 36, 0.9)',
+    labelHalo: 'rgba(244, 242, 238, 0.92)',
+    chainLabel: 'rgba(68, 64, 60, 0.32)',
+    ring: '#292524',
+    topic: '#44403c',
+    dimAlpha: 0.14,
+    linkAlpha: { lineage: 0.55, reasoning: 0.6, reference: 0.22, session: 0.45, sequence: 0.18, topic: 0.15 },
+  },
 }
 
-const TYPE_COLORS_DARK: Record<string, string> = {
-  Decision: '#6b9fff',
-  LessonLearned: '#3dd68c',
-  Correction: '#ff7b7b',
-  AssumptionInvalidated: '#f0a04b',
-  Constraint: '#b49aff',
-  Summary: '#9aa3ad',
-  Checkpoint: '#8b939e',
-  Plan: '#4ec4ef',
-  Subgoal: '#6dd3f0',
-  TaskComplete: '#3ddeb0',
-  Question: '#e8c547',
-  Wonder: '#f0b84a',
-  Hypothesis: '#a794ff',
-  StateSnapshot: '#3dceb8',
-  Mistake: '#ff6b6b',
-  LLMExtracted: '#a8b0bc',
+const FAMILY_COLORS: Record<Theme, Record<string, string>> = {
+  dark: {
+    decision: '#9fb3c8',
+    knowledge: '#8fb5ad',
+    lesson: '#a9bd92',
+    correction: '#d39d8c',
+    progress: '#d4bd8e',
+    summary: '#8e8999',
+    inquiry: '#c3a1b3',
+    [OTHER_FAMILY]: '#8b8f96',
+  },
+  light: {
+    decision: '#5b7690',
+    knowledge: '#4d7e75',
+    lesson: '#6a8354',
+    correction: '#a5604e',
+    progress: '#9b7f42',
+    summary: '#7a7484',
+    inquiry: '#94667d',
+    [OTHER_FAMILY]: '#7b7f87',
+  },
 }
 
-const RELATION_COLORS_LIGHT: Record<string, string> = {
-  CausedBy: '#c27803',
-  Corrects: '#d64545',
-  Invalidates: '#c53030',
-  Supersedes: '#c73d6a',
-  DerivedFrom: '#2f6fed',
-  Summarizes: '#5b6570',
-  References: '#7a8494',
-  Supports: '#1a9a5c',
-  ContinuesFrom: '#0b8fbf',
-  BranchesFrom: '#7c5cbf',
+/** Distinct categorical hues for chains and agents, ordered by size. */
+const CATEGORICAL: Record<Theme, string[]> = {
+  dark: [
+    '#9fb3c8', '#a9bd92', '#d4bd8e', '#d39d8c', '#8fb5ad', '#b5a6c9',
+    '#c3a1b3', '#c9b79c', '#93a8a0', '#b8a48c', '#a3aebd', '#c4c09a',
+    '#a99a8e', '#9db8c2', '#bfa5a0', '#a5b29a',
+  ],
+  light: [
+    '#5b7690', '#6a8354', '#9b7f42', '#a5604e', '#4d7e75', '#76689a',
+    '#94667d', '#8a7350', '#5e7a70', '#83694c', '#5f6f86', '#7c7a45',
+    '#7b6a5e', '#4f7f8f', '#8f6560', '#68795a',
+  ],
 }
 
-const RELATION_COLORS_DARK: Record<string, string> = {
-  CausedBy: '#f0b84a',
-  Corrects: '#ff7b7b',
-  Invalidates: '#ff6b6b',
-  Supersedes: '#ff7aa0',
-  DerivedFrom: '#6b9fff',
-  Summarizes: '#9aa3ad',
-  References: '#a8b0bc',
-  Supports: '#3dd68c',
-  ContinuesFrom: '#4ec4ef',
-  BranchesFrom: '#b49aff',
+const RELATION_COLORS: Record<Theme, Record<string, string>> = {
+  dark: {
+    Supersedes: '#d4b48e',
+    Corrects: '#d39d8c',
+    Invalidates: '#c98b7c',
+    Contradicts: '#c98b7c',
+    DerivedFrom: '#9fb3c8',
+    Supports: '#a9bd92',
+    CausedBy: '#d4bd8e',
+    Summarizes: '#b5a6c9',
+    ContinuesFrom: '#9fb3c8',
+    BranchesFrom: '#b5a6c9',
+    RelatedTo: '#8fb5ad',
+    References: '#a19c94',
+    Mentions: '#a19c94',
+    SameSession: '#c9c2b5',
+    About: '#bdb7ad',
+    Precedes: '#8a857e',
+  },
+  light: {
+    Supersedes: '#9b7445',
+    Corrects: '#a5604e',
+    Invalidates: '#94503f',
+    Contradicts: '#94503f',
+    DerivedFrom: '#5b7690',
+    Supports: '#6a8354',
+    CausedBy: '#9b7f42',
+    Summarizes: '#76689a',
+    ContinuesFrom: '#5b7690',
+    BranchesFrom: '#76689a',
+    RelatedTo: '#4d7e75',
+    References: '#78716c',
+    Mentions: '#78716c',
+    SameSession: '#57534e',
+    About: '#57534e',
+    Precedes: '#a8a29e',
+  },
 }
 
-const FALLBACK_TYPE: Record<Theme, string> = {
-  light: '#6b7280',
-  dark: '#8b939e',
+export function familyColor(family: string, theme: Theme): string {
+  return FAMILY_COLORS[theme][family] ?? FAMILY_COLORS[theme][OTHER_FAMILY]
 }
 
-const FALLBACK_RELATION: Record<Theme, string> = {
-  light: '#7a8494',
-  dark: '#a8b0bc',
+export function relationColor(kind: string, theme: Theme): string {
+  return RELATION_COLORS[theme][kind] ?? RELATION_COLORS[theme].References
 }
 
-/** Soften typed relations so they don't overpower the canvas. */
-const RELATION_OPACITY: Record<Theme, number> = {
-  light: 0.52,
-  dark: 0.58,
+/** Stable colour per value: values are ranked by frequency, then cycled. */
+export function categoricalScale(
+  rankedValues: string[],
+  theme: Theme,
+): (value: string) => string {
+  const palette = CATEGORICAL[theme]
+  const lookup = new Map(rankedValues.map((v, i) => [v, palette[i % palette.length]]))
+  return (value) => lookup.get(value) ?? palette[palette.length - 1]
 }
 
-const REF_COLOR: Record<Theme, string> = {
-  light: 'rgba(90, 100, 112, 0.46)',
-  dark: 'rgba(160, 170, 185, 0.42)',
+export function linkColor(link: GraphLink, theme: Theme): string {
+  return withAlpha(relationColor(link.kind, theme), CANVAS[theme].linkAlpha[link.category])
 }
 
-const SPINE_COLOR: Record<Theme, string> = {
-  light: 'rgba(90, 100, 112, 0.3)',
-  dark: 'rgba(160, 170, 185, 0.28)',
+export function linkWidth(link: GraphLink): number {
+  if (link.category === 'lineage') return 1.1
+  if (link.category === 'reasoning' || link.category === 'session') return 1
+  return 0.55
 }
 
-function withHexAlpha(hex: string, alpha: number): string {
-  const raw = hex.replace('#', '')
-  if (raw.length !== 6) return hex
+export function colorizeGraph(
+  data: MapData,
+  theme: Theme,
+  nodeColor: (node: GraphNode) => string,
+): MapData {
+  return {
+    nodes: data.nodes.map((node) => ({
+      ...node,
+      color: node.kind === 'topic' ? CANVAS[theme].topic : nodeColor(node),
+    })),
+    links: data.links.map((link) => ({ ...link, color: linkColor(link, theme) })),
+  }
+}
+
+export function nodeColorFn(
+  mode: ColorMode,
+  theme: Theme,
+  chainColor: (chain: string) => string,
+  agentColor: (agent: string) => string,
+): (node: GraphNode) => string {
+  if (mode === 'chain') return (node) => chainColor(node.chainKey)
+  if (mode === 'agent') return (node) => agentColor(node.agent)
+  return (node) => familyColor(node.family, theme)
+}
+
+/** Muted ochre ring for contested thoughts. */
+export const CONTESTED_RING = '#c9a66b'
+
+export function withAlpha(color: string, alpha: number): string {
+  if (color.startsWith('rgba(')) {
+    return color.replace(/,\s*[\d.]+\)$/, `, ${alpha})`)
+  }
+  const raw = color.replace('#', '')
+  if (raw.length !== 6) return color
   const r = Number.parseInt(raw.slice(0, 2), 16)
   const g = Number.parseInt(raw.slice(2, 4), 16)
   const b = Number.parseInt(raw.slice(4, 6), 16)
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
-
-export const CANVAS: Record<Theme, CanvasPalette> = {
-  light: {
-    background: '#f4f6f8',
-    label: '#4a5562',
-    selectedStroke: '#1a2332',
-    linkFallback: 'rgba(90, 100, 112, 0.36)',
-    dimOpacity: 0.28,
-    haloSelected: 0.2,
-    haloLarge: 0.1,
-    labelFont: '500 1em "Sora", system-ui, sans-serif',
-  },
-  dark: {
-    background: '#0a0c10',
-    label: '#9aa3ad',
-    selectedStroke: '#eef2f6',
-    linkFallback: 'rgba(160, 170, 185, 0.34)',
-    dimOpacity: 0.22,
-    haloSelected: 0.32,
-    haloLarge: 0.16,
-    labelFont: '500 1em "Sora", system-ui, sans-serif',
-  },
-}
-
-export function typeColors(theme: Theme): Record<string, string> {
-  return theme === 'dark' ? TYPE_COLORS_DARK : TYPE_COLORS_LIGHT
-}
-
-export function colorForThoughtType(thoughtType: string, theme: Theme): string {
-  const map = typeColors(theme)
-  return map[thoughtType] ?? FALLBACK_TYPE[theme]
-}
-
-export function colorForRelation(kind: RelationKind, theme: Theme): string {
-  const map = theme === 'dark' ? RELATION_COLORS_DARK : RELATION_COLORS_LIGHT
-  const hex = map[kind] ?? FALLBACK_RELATION[theme]
-  return withHexAlpha(hex, RELATION_OPACITY[theme])
-}
-
-export function colorForLink(link: GraphLink, theme: Theme): string {
-  if (link.kind === 'spine') return SPINE_COLOR[theme]
-  if (link.kind === 'ref') return REF_COLOR[theme]
-  if (link.relationKind) return colorForRelation(link.relationKind, theme)
-  return CANVAS[theme].linkFallback
-}
-
-export function linkWidthForKind(kind: GraphLink['kind']): number {
-  if (kind === 'spine') return 0.55
-  if (kind === 'ref') return 0.75
-  return 0.75
-}
-
-/** Dashed pattern for refs; solid for others. */
-export function linkDashForKind(
-  kind: GraphLink['kind'],
-): number[] | null {
-  if (kind === 'ref') return [3.5, 2.5]
-  return null
-}
-
-export function colorizeGraph(data: GraphData, theme: Theme): GraphData {
-  return {
-    nodes: data.nodes.map((node) => ({
-      ...node,
-      color: colorForThoughtType(node.thoughtType, theme),
-    })),
-    links: data.links.map((link) => ({
-      ...link,
-      color: colorForLink(link, theme),
-    })),
-  }
 }

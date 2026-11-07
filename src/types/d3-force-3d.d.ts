@@ -1,18 +1,25 @@
 declare module 'd3-force-3d' {
-  export interface CollisionForce<Node> {
+  type Accessor<Node, T> = T | ((node: Node, index: number, nodes: Node[]) => T)
+
+  export interface Force<Node> {
     (alpha: number): void
     initialize?: (nodes: Node[], ...args: unknown[]) => void
-    iterations(): number
+  }
+
+  export interface CollisionForce<Node> extends Force<Node> {
     iterations(value: number): CollisionForce<Node>
-    strength(): number
     strength(value: number): CollisionForce<Node>
-    radius(): number | ((node: Node) => number)
-    radius(
-      value: number | ((node: Node, index: number, nodes: Node[]) => number),
-    ): CollisionForce<Node>
+    radius(value: Accessor<Node, number>): CollisionForce<Node>
+  }
+
+  export interface PositionForce<Node> extends Force<Node> {
+    strength(value: Accessor<Node, number>): PositionForce<Node>
   }
 
   export function forceCollide<Node = unknown>(
-    radius?: number | ((node: Node, index: number, nodes: Node[]) => number),
+    radius?: Accessor<Node, number>,
   ): CollisionForce<Node>
+  export function forceX<Node = unknown>(x?: Accessor<Node, number>): PositionForce<Node>
+  export function forceY<Node = unknown>(y?: Accessor<Node, number>): PositionForce<Node>
+  export function forceZ<Node = unknown>(z?: Accessor<Node, number>): PositionForce<Node>
 }
