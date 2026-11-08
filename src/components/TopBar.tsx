@@ -25,6 +25,12 @@ interface TopBarProps {
 
 const MAX_RESULTS = 8
 
+const LAYOUT_LABELS: Record<LayoutMode, string> = {
+  network: 'Network',
+  topics: 'Topics',
+  timeline: 'Timeline',
+}
+
 export function TopBar({
   search,
   onSearchChange,
@@ -146,7 +152,7 @@ export function TopBar({
 
       <div className="actions glass">
         <div className="segmented compact" role="radiogroup" aria-label="Organise by">
-          {(['network', 'topics'] as const).map((l) => (
+          {(['network', 'topics', 'timeline'] as const).map((l) => (
             <button
               key={l}
               type="button"
@@ -155,7 +161,7 @@ export function TopBar({
               className={layout === l ? 'is-active' : undefined}
               onClick={() => onLayoutChange(l)}
             >
-              {l === 'topics' ? 'Topics' : 'Network'}
+              {LAYOUT_LABELS[l]}
             </button>
           ))}
         </div>
