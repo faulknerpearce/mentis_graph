@@ -466,12 +466,6 @@ export function ThoughtGraph({
         ctx.textBaseline = 'top'
         ctx.fillStyle = dimmed ? withAlpha(palette.label, palette.dimOpacity) : palette.label
         ctx.fillText(`#${n.index} · ${n.thoughtType}`, x, y + radius + 1.5)
-        if (selected && n.title && scale > 0.9) {
-          ctx.font = font(Math.max(8.5 / scale, 2))
-          ctx.fillStyle = withAlpha(palette.label, 0.75)
-          const title = n.title.length > 42 ? `${n.title.slice(0, 40)}…` : n.title
-          ctx.fillText(title, x, y + radius + fontSize + 2.2)
-        }
       }
     },
     [selectedId, hoveredId, isDimmed, palette, theme, font, layout],
