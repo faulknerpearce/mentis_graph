@@ -10,9 +10,7 @@
   --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
 
   --bg: #0e0e0f;
-  --bg-glow-1: rgba(214, 205, 189, 0.05);
-  --bg-glow-2: rgba(159, 179, 200, 0.035);
-  --grid-dot: rgba(214, 208, 198, 0.05);
+  --canvas: #0a0c10;
   --glass: rgba(24, 23, 22, 0.74);
   --glass-strong: rgba(28, 27, 26, 0.94);
   --border: rgba(236, 232, 225, 0.07);
@@ -41,9 +39,7 @@
 
 :root[data-theme='light'] {
   --bg: #f4f2ee;
-  --bg-glow-1: rgba(120, 113, 108, 0.06);
-  --bg-glow-2: rgba(91, 118, 144, 0.04);
-  --grid-dot: rgba(41, 37, 36, 0.06);
+  --canvas: #f4f6f8;
   --glass: rgba(252, 251, 249, 0.76);
   --glass-strong: rgba(253, 252, 250, 0.96);
   --border: rgba(41, 37, 36, 0.08);
@@ -125,11 +121,7 @@ summary:focus-visible {
 .stage {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(1200px 800px at 18% 12%, var(--bg-glow-1), transparent 60%),
-    radial-gradient(1000px 700px at 85% 90%, var(--bg-glow-2), transparent 60%),
-    radial-gradient(var(--grid-dot) 1px, transparent 1px) 0 0 / 22px 22px,
-    var(--bg);
+  background: var(--canvas);
 }
 
 .graph-canvas {

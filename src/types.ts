@@ -179,7 +179,7 @@ export interface MapData {
 
 export type GraphMode = '2d' | '3d'
 
-export type LayoutMode = 'topics' | 'chains'
+export type LayoutMode = 'network' | 'topics'
 
 export type EdgeToggles = Record<RelationCategory, boolean>
 

@@ -16,6 +16,7 @@ declare module 'd3-force-3d' {
     strength(value: Accessor<Node, number>): PositionForce<Node>
   }
 
+  export function forceCenter<Node = unknown>(x?: number, y?: number, z?: number): Force<Node>
   export function forceCollide<Node = unknown>(
     radius?: Accessor<Node, number>,
   ): CollisionForce<Node>

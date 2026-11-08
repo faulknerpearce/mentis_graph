@@ -42,9 +42,9 @@ function chainScoped(chainKey: string, value: string | number): string {
 }
 
 export function nodeSize(degree: number, importance: number | null | undefined, versions = 0): number {
-  return Math.min(
-    14,
-    2.6 + Math.sqrt(degree) * 1.15 + (importance ?? 0.4) * 1.6 + Math.sqrt(versions) * 0.6,
+  return Math.max(
+    3.2,
+    Math.min(14, 3.2 + degree * 0.7 + (importance ?? 0.3) * 3 + Math.sqrt(versions) * 0.6),
   )
 }
 
