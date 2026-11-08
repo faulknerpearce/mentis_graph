@@ -59,7 +59,7 @@ const CLICK_MOVE_TOLERANCE_PX = 6
 /** Extra screen-space radius (px) around each node for easier targeting. */
 const HIT_PADDING_PX = 12
 /** Minimum graph-space gap between rendered node circles. */
-const NODE_GAP = 4
+const NODE_GAP = 8
 /** Zoom level above which thought labels are drawn. */
 const LABEL_ZOOM = 1.15
 const TOPIC_LABEL_ZOOM = 0.7
@@ -82,9 +82,9 @@ const TOPIC_PHYSICS = {
   pull: 0.012,
 } as const
 
-/** d3-force defaults, used by the network layout. */
-const DEFAULT_CHARGE = -30
-const DEFAULT_LINK_DISTANCE = 30
+/** Network forces: d3's defaults, loosened a little so nodes have room. */
+const NETWORK_CHARGE = -45
+const NETWORK_LINK_DISTANCE = 40
 
 export function ThoughtGraph({
   data,
@@ -173,9 +173,9 @@ export function ThoughtGraph({
         fg.d3Force('x', null)
         fg.d3Force('y', null)
         fg.d3Force('center', forceCenter())
-        charge?.strength?.(DEFAULT_CHARGE)
+        charge?.strength?.(NETWORK_CHARGE)
         charge?.distanceMax?.(Infinity)
-        link?.distance?.(DEFAULT_LINK_DISTANCE)
+        link?.distance?.(NETWORK_LINK_DISTANCE)
         link?.strength?.((l: GraphLink) => {
           const counts = linkCountsRef.current
           return (
@@ -193,7 +193,7 @@ export function ThoughtGraph({
         layout === 'topics'
           ? forceCollide<NodeObject>((node) => {
               const n = node as SimNode
-              return n.size + (n.kind === 'topic' ? 16 : 5)
+              return n.size + (n.kind === 'topic' ? 18 : 8)
             }).iterations(2)
           : forceCollide<NodeObject>((node) => (node as SimNode).size * 1.25 + NODE_GAP).iterations(4)
       fg.d3Force('collide', collide)
