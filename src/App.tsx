@@ -247,13 +247,15 @@ export default function App() {
   }, [scoped.links])
 
   const statusCounts = useMemo(() => {
+    let live = 0
     let retired = 0
     let contested = 0
     for (const node of fullGraph.nodes) {
       if (node.status === 'retired') retired += 1
       else if (node.status === 'contested') contested += 1
+      else live += 1
     }
-    return { retired, contested }
+    return { live, retired, contested }
   }, [fullGraph.nodes])
 
   const times = useMemo(() => scoped.nodes.map((n) => n.time), [scoped.nodes])
@@ -361,6 +363,7 @@ export default function App() {
           onEdgesChange={setEdges}
           showRetired={showRetired}
           onShowRetiredChange={setShowRetired}
+          liveCount={statusCounts.live}
           retiredCount={statusCounts.retired}
           contestedCount={statusCounts.contested}
           chainOptions={chainOptions}
