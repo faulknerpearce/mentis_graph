@@ -16,6 +16,7 @@ import ForceGraph2D, {
 import type { ForceGraphMethods as ForceGraph3DMethods } from 'react-force-graph-3d'
 import type { Theme } from '../hooks/useTheme'
 import { linkEnd } from '../graph/buildGraph'
+import { TIMELINE_NODE_SIZE, type TimelineLayout } from '../graph/timeline'
 import { formatDate } from '../lib/format'
 import { CANVAS, CONTESTED_RING, linkDash, linkWidth, withAlpha } from '../theme/palette'
 import type { GraphLink, GraphMode, LayoutMode, MapData, MapNode } from '../types'
@@ -31,6 +32,8 @@ export interface FocusRequest {
 interface ThoughtGraphProps {
   data: MapData
   layout: LayoutMode
+  /** Lane and time scale for the timeline layout; null in the others. */
+  timeline: TimelineLayout | null
   selectedId: string | null
   /** Nodes outside this set are dimmed; null dims nothing. */
   highlight: Set<string> | null
@@ -70,6 +73,7 @@ const TOPIC_LABEL_ZOOM = 0.7
 const COOLING: Record<LayoutMode, { velocityDecay: number; alphaDecay: number; ticks: number }> = {
   network: { velocityDecay: 0.35, alphaDecay: 0.0228, ticks: 220 },
   topics: { velocityDecay: 0.45, alphaDecay: 0.011, ticks: 640 },
+  timeline: { velocityDecay: 0.6, alphaDecay: 0.1, ticks: 30 },
 }
 
 /**
@@ -86,9 +90,13 @@ const TOPIC_PHYSICS = {
 const NETWORK_CHARGE = -45
 const NETWORK_LINK_DISTANCE = 40
 
+/** Screen-space gap between lane labels and the filter panel (or edge). */
+const LANE_LABEL_INSET_PX = 14
+
 export function ThoughtGraph({
   data,
   layout,
+  timeline,
   selectedId,
   highlight,
   theme,
@@ -124,11 +132,19 @@ export function ThoughtGraph({
     }
     const nodes = data.nodes.map((n) => {
       const pos = posRef.current.get(n.id)
-      return (pos ? { ...n, ...pos } : { ...n }) as SimNode
+      const node = (pos ? { ...n, ...pos } : { ...n }) as SimNode
+      // The timeline pins every thought to its slot in its day's stack.
+      const slot = timeline && n.kind === 'thought' ? timeline.positions.get(n.id) : undefined
+      if (slot) {
+        node.x = node.fx = slot.x
+        node.y = node.fy = slot.y
+        node.size = TIMELINE_NODE_SIZE
+      }
+      return node
     })
     nodesRef.current = nodes
     return { nodes, links: data.links.map((l) => ({ ...l })) }
-  }, [data, resetKey])
+  }, [data, resetKey, timeline])
 
   // Degree per node, for d3's default link strength in the network layout.
   const linkCounts = useMemo(() => {
@@ -159,7 +175,14 @@ export function ThoughtGraph({
       const charge = fg.d3Force('charge') as unknown as TunableForce | undefined
       const link = fg.d3Force('link') as unknown as TunableForce | undefined
 
-      if (layout === 'topics') {
+      if (layout === 'timeline') {
+        // Every thought is pinned, so no force needs to move anything.
+        fg.d3Force('center', null)
+        fg.d3Force('x', null)
+        fg.d3Force('y', null)
+        charge?.strength?.(0)
+        link?.strength?.(0)
+      } else if (layout === 'topics') {
         fg.d3Force('center', null)
         fg.d3Force('x', forceX<NodeObject>(0).strength(TOPIC_PHYSICS.pull))
         fg.d3Force('y', forceY<NodeObject>(0).strength(TOPIC_PHYSICS.pull))
@@ -187,8 +210,8 @@ export function ThoughtGraph({
           )
         })
       }
-      // The network keeps thoughts well apart; the topic map packs them
-      // tightly round their hubs.
+      // The network and timeline keep thoughts well apart; the topic map packs
+      // them more tightly round their hubs.
       const collide =
         layout === 'topics'
           ? forceCollide<NodeObject>((node) => {
@@ -196,7 +219,7 @@ export function ThoughtGraph({
               return n.size + (n.kind === 'topic' ? 18 : 8)
             }).iterations(2)
           : forceCollide<NodeObject>((node) => (node as SimNode).size * 1.25 + NODE_GAP).iterations(4)
-      fg.d3Force('collide', collide)
+      fg.d3Force('collide', layout === 'timeline' ? null : collide)
       fg.d3ReheatSimulation()
     }
 
@@ -204,7 +227,7 @@ export function ThoughtGraph({
     return () => {
       cancelled = true
     }
-  }, [graphData, mode, layout])
+  }, [graphData, mode, layout, timeline])
 
   useEffect(() => {
     const el = containerRef.current
@@ -433,7 +456,8 @@ export function ThoughtGraph({
         ctx.stroke()
       }
 
-      if (scale > LABEL_ZOOM || selected) {
+      // Timeline stacks are too dense for labels on every thought.
+      if (selected || (layout !== 'timeline' && scale > LABEL_ZOOM)) {
         ctx.font = font(fontSize)
         ctx.textAlign = 'center'
         ctx.textBaseline = 'top'
@@ -447,7 +471,7 @@ export function ThoughtGraph({
         }
       }
     },
-    [selectedId, hoveredId, isDimmed, palette, theme, font],
+    [selectedId, hoveredId, isDimmed, palette, theme, font, layout],
   )
 
   const resolveLinkStyle = useCallback(
@@ -465,12 +489,82 @@ export function ThoughtGraph({
     [highlight, palette],
   )
 
+  /** Lane bands and month gridlines, drawn beneath the nodes. */
+  const paintLanes = useCallback(
+    (ctx: CanvasRenderingContext2D, scale: number) => {
+      if (!timeline) return
+      const { left, right, top, bottom } = timeline
+      ctx.save()
+      let shade = false
+      for (const lane of timeline.lanes.values()) {
+        if (shade) {
+          ctx.fillStyle = withAlpha(palette.label, 0.035)
+          ctx.fillRect(left - 40, lane.y - lane.height / 2 - 13, right - left + 80, lane.height + 26)
+        }
+        shade = !shade
+      }
+      ctx.strokeStyle = withAlpha(palette.label, 0.12)
+      ctx.lineWidth = 1 / scale
+      ctx.setLineDash([4 / scale, 6 / scale])
+      for (const tick of timeline.ticks) {
+        ctx.beginPath()
+        ctx.moveTo(tick.x, top - 24)
+        ctx.lineTo(tick.x, bottom + 12)
+        ctx.stroke()
+      }
+      ctx.restore()
+    },
+    [timeline, palette],
+  )
+
+  /**
+   * Chain names at the top left of each lane, kept clear of the filter panel
+   * as you pan, and month labels along the top.
+   */
+  const paintLaneLabels = useCallback(
+    (ctx: CanvasRenderingContext2D, scale: number) => {
+      if (!timeline) return
+      const fg = fgRef.current
+      const canvas = containerRef.current?.querySelector('canvas')
+      const panel = document.querySelector('.filter-panel')
+      let insetPx = LANE_LABEL_INSET_PX
+      if (canvas && panel) {
+        insetPx += Math.max(0, panel.getBoundingClientRect().right - canvas.getBoundingClientRect().left)
+      }
+      const visibleLeft = fg ? fg.screen2GraphCoords(insetPx, 0).x : timeline.left
+      const labelX = Math.max(timeline.left - 34, visibleLeft)
+      const px = Math.max(11 / scale, 3)
+      ctx.save()
+      ctx.font = palette.labelFont.replace('1em', `${px}px`).replace('500', '600')
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      ctx.lineJoin = 'round'
+      ctx.lineWidth = 3 / scale
+      ctx.strokeStyle = withAlpha(palette.background, 0.85)
+      ctx.fillStyle = palette.label
+      for (const lane of timeline.lanes.values()) {
+        const y = lane.y - lane.height / 2 - 2
+        ctx.strokeText(lane.chain, labelX, y)
+        ctx.fillText(lane.chain, labelX, y)
+      }
+      ctx.font = palette.labelFont.replace('1em', `${Math.max(10 / scale, 2.6)}px`)
+      ctx.fillStyle = withAlpha(palette.label, 0.75)
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'bottom'
+      for (const tick of timeline.ticks) {
+        ctx.fillText(tick.label, tick.x, timeline.top - 28)
+      }
+      ctx.restore()
+    },
+    [timeline, palette],
+  )
+
   const fitView = useCallback(
     (ms: number) => {
-      if (mode === '2d') fgRef.current?.zoomToFit(ms, 60)
+      if (mode === '2d') fgRef.current?.zoomToFit(ms, timeline ? 110 : 60)
       else fg3dRef.current?.zoomToFit(ms, 60)
     },
-    [mode],
+    [mode, timeline],
   )
 
   const handleEngineStop = useCallback(() => {
@@ -536,6 +630,8 @@ export function ThoughtGraph({
             backgroundColor={palette.background}
             nodeCanvasObjectMode={() => 'replace'}
             nodeCanvasObject={paintNode}
+            onRenderFramePre={paintLanes}
+            onRenderFramePost={paintLaneLabels}
             linkColor={(link) => resolveLinkStyle(link).color}
             linkWidth={(link) => resolveLinkStyle(link).width}
             linkLineDash={(link) => resolveLinkStyle(link).dash}

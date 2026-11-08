@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listChains, loadThoughtsForChains } from './api/mentis'
 import { buildGraph, filterGraph, neighborIdsFor, searchNodes } from './graph/buildGraph'
+import { timelineLayout } from './graph/timeline'
 import { buildTopicIndex, withTopics } from './graph/topics'
 import { FilterPanel } from './components/FilterPanel'
 import { Inspector } from './components/Inspector'
@@ -39,10 +40,11 @@ const ALL_EDGES: EdgeToggles = {
 /** Edges that shape each layout by default, and the colouring that reads best. */
 const LAYOUT_DEFAULTS: Record<
   LayoutMode,
-  { sequence: boolean; session: boolean; color: ColorMode }
+  { sequence: boolean; session: boolean; reference: boolean; color: ColorMode }
 > = {
-  network: { sequence: true, session: false, color: 'type' },
-  topics: { sequence: false, session: true, color: 'chain' },
+  network: { sequence: true, session: false, reference: true, color: 'type' },
+  topics: { sequence: false, session: true, reference: true, color: 'chain' },
+  timeline: { sequence: true, session: false, reference: false, color: 'type' },
 }
 
 export default function App() {
@@ -61,6 +63,7 @@ export default function App() {
     ...ALL_EDGES,
     sequence: LAYOUT_DEFAULTS.network.sequence,
     session: LAYOUT_DEFAULTS.network.session,
+    reference: LAYOUT_DEFAULTS.network.reference,
   })
   const [showRetired, setShowRetired] = useState(false)
   const [until, setUntil] = useState<number | null>(null)
@@ -196,6 +199,12 @@ export default function App() {
     [scoped, edges, until],
   )
 
+  // Built from every loaded thought so lanes and the time scale stay put while filtering.
+  const timeline = useMemo(
+    () => (layout === 'timeline' ? timelineLayout(fullGraph.nodes) : null),
+    [layout, fullGraph.nodes],
+  )
+
   const topicIndex = useMemo(() => buildTopicIndex(fullGraph.nodes), [fullGraph.nodes])
 
   const mapData = useMemo(
@@ -282,6 +291,7 @@ export default function App() {
       ...prev,
       sequence: LAYOUT_DEFAULTS[next].sequence,
       session: LAYOUT_DEFAULTS[next].session,
+      reference: LAYOUT_DEFAULTS[next].reference,
     }))
     setColorMode(LAYOUT_DEFAULTS[next].color)
     setSelectedId(null)
@@ -323,6 +333,7 @@ export default function App() {
         <ThoughtGraph
           data={coloredGraph}
           layout={layout}
+          timeline={timeline}
           selectedId={selectedId}
           highlight={highlight}
           theme={theme}
