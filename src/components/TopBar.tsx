@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { Theme } from '../hooks/useTheme'
 import type { GraphMode, GraphNode, LayoutMode } from '../types'
 import { Icon } from './Icon'
+import { Logo } from './Logo'
 
 interface TopBarProps {
   search: string
@@ -78,7 +79,7 @@ export function TopBar({
         >
           <Icon name="sliders" />
         </button>
-        <div className="brand-mark" aria-hidden="true" />
+        <Logo className="brand-mark" />
         <div className="brand-text">
           <span className="brand-name">Mentis</span>
           <span className="brand-sub">Thought graph</span>
