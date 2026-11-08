@@ -13,6 +13,7 @@ interface FilterPanelProps {
   onEdgesChange: (edges: EdgeToggles) => void
   showRetired: boolean
   onShowRetiredChange: (value: boolean) => void
+  liveCount: number
   retiredCount: number
   contestedCount: number
   chainOptions: FacetOption[]
@@ -43,6 +44,7 @@ export function FilterPanel(props: FilterPanelProps) {
     onEdgesChange,
     showRetired,
     onShowRetiredChange,
+    liveCount,
     retiredCount,
     contestedCount,
     chainOptions,
@@ -88,11 +90,19 @@ export function FilterPanel(props: FilterPanelProps) {
 
       <section className="panel-section">
         <div className="section-label">Memory state</div>
-        <div className="state-legend">
-          <span><i className="glyph live" />Live</span>
-          <span><i className="glyph contested" />Contested {contestedCount}</span>
-          <span><i className="glyph retired" />Retired {retiredCount}</span>
-        </div>
+        <ul className="state-legend">
+          {[
+            { id: 'live', label: 'Live', count: liveCount },
+            { id: 'contested', label: 'Contested', count: contestedCount },
+            { id: 'retired', label: 'Retired', count: retiredCount },
+          ].map((state) => (
+            <li key={state.id} className="state-item">
+              <i className={`glyph ${state.id}`} />
+              <span className="state-label">{state.label}</span>
+              <span className="state-count">{state.count.toLocaleString()}</span>
+            </li>
+          ))}
+        </ul>
         <label className="switch-row">
           <span>
             Show retired memories
