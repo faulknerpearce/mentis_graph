@@ -1,124 +1,201 @@
 import type { Theme } from '../hooks/useTheme'
-import { OTHER_FAMILY } from '../graph/taxonomy'
-import type { ColorMode, EdgeCategory, GraphLink, GraphNode, MapData } from '../types'
+import type {
+  ColorMode,
+  EdgeCategory,
+  GraphLink,
+  GraphNode,
+  MapData,
+  RelationCategory,
+} from '../types'
 
 export interface CanvasPalette {
-  /** Solid fallback for the WebGL renderer; the 2D canvas is transparent. */
   background: string
   label: string
-  labelHalo: string
-  chainLabel: string
-  ring: string
+  selectedStroke: string
   topic: string
-  dimAlpha: number
-  linkAlpha: Record<EdgeCategory, number>
+  linkFallback: string
+  dimOpacity: number
+  haloSelected: number
+  haloLarge: number
+  labelFont: string
 }
 
 export const CANVAS: Record<Theme, CanvasPalette> = {
-  dark: {
-    background: '#0e0e0f',
-    label: 'rgba(231, 227, 219, 0.9)',
-    labelHalo: 'rgba(14, 14, 15, 0.88)',
-    chainLabel: 'rgba(214, 208, 198, 0.3)',
-    ring: '#ece8e1',
-    topic: '#d9d4ca',
-    dimAlpha: 0.1,
-    linkAlpha: { lineage: 0.5, reasoning: 0.55, reference: 0.17, session: 0.42, sequence: 0.14, topic: 0.11 },
-  },
   light: {
-    background: '#f4f2ee',
-    label: 'rgba(41, 37, 36, 0.9)',
-    labelHalo: 'rgba(244, 242, 238, 0.92)',
-    chainLabel: 'rgba(68, 64, 60, 0.32)',
-    ring: '#292524',
-    topic: '#44403c',
-    dimAlpha: 0.14,
-    linkAlpha: { lineage: 0.55, reasoning: 0.6, reference: 0.22, session: 0.45, sequence: 0.18, topic: 0.15 },
+    background: '#f4f6f8',
+    label: '#4a5562',
+    selectedStroke: '#1a2332',
+    topic: '#5b6570',
+    linkFallback: 'rgba(90, 100, 112, 0.36)',
+    dimOpacity: 0.28,
+    haloSelected: 0.2,
+    haloLarge: 0.1,
+    labelFont: '500 1em "Sora", system-ui, sans-serif',
+  },
+  dark: {
+    background: '#0a0c10',
+    label: '#9aa3ad',
+    selectedStroke: '#eef2f6',
+    topic: '#9aa3ad',
+    linkFallback: 'rgba(160, 170, 185, 0.34)',
+    dimOpacity: 0.22,
+    haloSelected: 0.32,
+    haloLarge: 0.16,
+    labelFont: '500 1em "Sora", system-ui, sans-serif',
   },
 }
 
-const FAMILY_COLORS: Record<Theme, Record<string, string>> = {
-  dark: {
-    decision: '#9fb3c8',
-    knowledge: '#8fb5ad',
-    lesson: '#a9bd92',
-    correction: '#d39d8c',
-    progress: '#d4bd8e',
-    summary: '#8e8999',
-    inquiry: '#c3a1b3',
-    [OTHER_FAMILY]: '#8b8f96',
-  },
+const TYPE_COLORS: Record<Theme, Record<string, string>> = {
   light: {
-    decision: '#5b7690',
-    knowledge: '#4d7e75',
-    lesson: '#6a8354',
-    correction: '#a5604e',
-    progress: '#9b7f42',
-    summary: '#7a7484',
-    inquiry: '#94667d',
-    [OTHER_FAMILY]: '#7b7f87',
+    Decision: '#2f6fed',
+    PreferenceUpdate: '#4f6fd6',
+    StrategyShift: '#5a52c9',
+    LessonLearned: '#1a9a5c',
+    Correction: '#d64545',
+    AssumptionInvalidated: '#d97706',
+    Constraint: '#7c5cbf',
+    Summary: '#5b6570',
+    Checkpoint: '#6b7280',
+    Plan: '#0b8fbf',
+    Subgoal: '#2899c4',
+    TaskComplete: '#0d9a6e',
+    ActionTaken: '#4a9a2e',
+    Handoff: '#b06a2b',
+    Question: '#b8860b',
+    Wonder: '#c27803',
+    Idea: '#c9a227',
+    Hypothesis: '#6d5bd0',
+    StateSnapshot: '#0f9a8a',
+    Mistake: '#c53030',
+    Insight: '#0e8f9e',
+    FactLearned: '#3a8f3a',
+    Finding: '#2a8a74',
+    PatternDetected: '#8a5cc2',
+    LLMExtracted: '#7a8494',
   },
+  dark: {
+    Decision: '#6b9fff',
+    PreferenceUpdate: '#8aa6ff',
+    StrategyShift: '#9b93ff',
+    LessonLearned: '#3dd68c',
+    Correction: '#ff7b7b',
+    AssumptionInvalidated: '#f0a04b',
+    Constraint: '#b49aff',
+    Summary: '#9aa3ad',
+    Checkpoint: '#8b939e',
+    Plan: '#4ec4ef',
+    Subgoal: '#6dd3f0',
+    TaskComplete: '#3ddeb0',
+    ActionTaken: '#93d96b',
+    Handoff: '#e8a467',
+    Question: '#e8c547',
+    Wonder: '#f0b84a',
+    Idea: '#f0d35a',
+    Hypothesis: '#a794ff',
+    StateSnapshot: '#3dceb8',
+    Mistake: '#ff6b6b',
+    Insight: '#45d0de',
+    FactLearned: '#7fd67f',
+    Finding: '#5fd1b5',
+    PatternDetected: '#c29cff',
+    LLMExtracted: '#a8b0bc',
+  },
+}
+
+const FALLBACK_TYPE: Record<Theme, string> = {
+  light: '#6b7280',
+  dark: '#8b939e',
 }
 
 /** Distinct categorical hues for chains and agents, ordered by size. */
 const CATEGORICAL: Record<Theme, string[]> = {
-  dark: [
-    '#9fb3c8', '#a9bd92', '#d4bd8e', '#d39d8c', '#8fb5ad', '#b5a6c9',
-    '#c3a1b3', '#c9b79c', '#93a8a0', '#b8a48c', '#a3aebd', '#c4c09a',
-    '#a99a8e', '#9db8c2', '#bfa5a0', '#a5b29a',
-  ],
   light: [
-    '#5b7690', '#6a8354', '#9b7f42', '#a5604e', '#4d7e75', '#76689a',
-    '#94667d', '#8a7350', '#5e7a70', '#83694c', '#5f6f86', '#7c7a45',
-    '#7b6a5e', '#4f7f8f', '#8f6560', '#68795a',
+    '#2f6fed', '#1a9a5c', '#d97706', '#7c5cbf', '#0b8fbf', '#d64545',
+    '#b8860b', '#0f9a8a', '#c73d6a', '#6d5bd0', '#4a9a2e', '#b06a2b',
+    '#0e8f9e', '#8a5cc2', '#5b6570', '#2899c4',
+  ],
+  dark: [
+    '#6b9fff', '#3dd68c', '#f0a04b', '#b49aff', '#4ec4ef', '#ff7b7b',
+    '#e8c547', '#3dceb8', '#ff7aa0', '#a794ff', '#93d96b', '#e8a467',
+    '#45d0de', '#c29cff', '#9aa3ad', '#6dd3f0',
   ],
 }
 
 const RELATION_COLORS: Record<Theme, Record<string, string>> = {
-  dark: {
-    Supersedes: '#d4b48e',
-    Corrects: '#d39d8c',
-    Invalidates: '#c98b7c',
-    Contradicts: '#c98b7c',
-    DerivedFrom: '#9fb3c8',
-    Supports: '#a9bd92',
-    CausedBy: '#d4bd8e',
-    Summarizes: '#b5a6c9',
-    ContinuesFrom: '#9fb3c8',
-    BranchesFrom: '#b5a6c9',
-    RelatedTo: '#8fb5ad',
-    References: '#a19c94',
-    Mentions: '#a19c94',
-    SameSession: '#c9c2b5',
-    About: '#bdb7ad',
-    Precedes: '#8a857e',
-  },
   light: {
-    Supersedes: '#9b7445',
-    Corrects: '#a5604e',
-    Invalidates: '#94503f',
-    Contradicts: '#94503f',
-    DerivedFrom: '#5b7690',
-    Supports: '#6a8354',
-    CausedBy: '#9b7f42',
-    Summarizes: '#76689a',
-    ContinuesFrom: '#5b7690',
-    BranchesFrom: '#76689a',
-    RelatedTo: '#4d7e75',
-    References: '#78716c',
-    Mentions: '#78716c',
-    SameSession: '#57534e',
-    About: '#57534e',
-    Precedes: '#a8a29e',
+    CausedBy: '#c27803',
+    Corrects: '#d64545',
+    Invalidates: '#c53030',
+    Contradicts: '#d97706',
+    Supersedes: '#c73d6a',
+    DerivedFrom: '#2f6fed',
+    Summarizes: '#5b6570',
+    References: '#7a8494',
+    Mentions: '#7a8494',
+    Supports: '#1a9a5c',
+    ContinuesFrom: '#0b8fbf',
+    BranchesFrom: '#7c5cbf',
+    RelatedTo: '#0f9a8a',
+    SameSession: '#8a6fb0',
+    About: '#7a8494',
+  },
+  dark: {
+    CausedBy: '#f0b84a',
+    Corrects: '#ff7b7b',
+    Invalidates: '#ff6b6b',
+    Contradicts: '#f0a04b',
+    Supersedes: '#ff7aa0',
+    DerivedFrom: '#6b9fff',
+    Summarizes: '#9aa3ad',
+    References: '#a8b0bc',
+    Mentions: '#a8b0bc',
+    Supports: '#3dd68c',
+    ContinuesFrom: '#4ec4ef',
+    BranchesFrom: '#b49aff',
+    RelatedTo: '#3dceb8',
+    SameSession: '#c0a8e6',
+    About: '#a8b0bc',
   },
 }
 
-export function familyColor(family: string, theme: Theme): string {
-  return FAMILY_COLORS[theme][family] ?? FAMILY_COLORS[theme][OTHER_FAMILY]
+const FALLBACK_RELATION: Record<Theme, string> = {
+  light: '#7a8494',
+  dark: '#a8b0bc',
+}
+
+/** Typed relations are softened so they do not overpower the canvas. */
+const RELATION_OPACITY: Record<Theme, number> = {
+  light: 0.52,
+  dark: 0.58,
+}
+
+const REF_COLOR: Record<Theme, string> = {
+  light: 'rgba(90, 100, 112, 0.46)',
+  dark: 'rgba(160, 170, 185, 0.42)',
+}
+
+const SPINE_COLOR: Record<Theme, string> = {
+  light: 'rgba(90, 100, 112, 0.3)',
+  dark: 'rgba(160, 170, 185, 0.28)',
+}
+
+const TOPIC_LINK_COLOR: Record<Theme, string> = {
+  light: 'rgba(90, 100, 112, 0.2)',
+  dark: 'rgba(160, 170, 185, 0.18)',
+}
+
+/** Ring drawn round a contested thought. */
+export const CONTESTED_RING: Record<Theme, string> = {
+  light: '#d97706',
+  dark: '#f0a04b',
+}
+
+export function typeColor(thoughtType: string, theme: Theme): string {
+  return TYPE_COLORS[theme][thoughtType] ?? FALLBACK_TYPE[theme]
 }
 
 export function relationColor(kind: string, theme: Theme): string {
-  return RELATION_COLORS[theme][kind] ?? RELATION_COLORS[theme].References
+  return RELATION_COLORS[theme][kind] ?? FALLBACK_RELATION[theme]
 }
 
 /** Stable colour per value: values are ranked by frequency, then cycled. */
@@ -131,14 +208,44 @@ export function categoricalScale(
   return (value) => lookup.get(value) ?? palette[palette.length - 1]
 }
 
-export function linkColor(link: GraphLink, theme: Theme): string {
-  return withAlpha(relationColor(link.kind, theme), CANVAS[theme].linkAlpha[link.category])
+export function linkColor(link: Pick<GraphLink, 'category' | 'kind'>, theme: Theme): string {
+  switch (link.category) {
+    case 'sequence':
+      return SPINE_COLOR[theme]
+    case 'reference':
+      return REF_COLOR[theme]
+    case 'topic':
+      return TOPIC_LINK_COLOR[theme]
+    default:
+      return withAlpha(relationColor(link.kind, theme), RELATION_OPACITY[theme])
+  }
 }
 
-export function linkWidth(link: GraphLink): number {
-  if (link.category === 'lineage') return 1.1
-  if (link.category === 'reasoning' || link.category === 'session') return 1
-  return 0.55
+export function linkWidth(category: EdgeCategory): number {
+  if (category === 'sequence') return 0.55
+  if (category === 'topic') return 0.5
+  return 0.75
+}
+
+/** Dashed references, dotted session links, solid everything else. */
+export function linkDash(category: EdgeCategory): number[] | null {
+  if (category === 'reference') return [3.5, 2.5]
+  if (category === 'session') return [1.2, 1.8]
+  return null
+}
+
+const EDGE_SAMPLE_KIND: Record<RelationCategory, string> = {
+  lineage: 'Supersedes',
+  reasoning: 'DerivedFrom',
+  reference: 'References',
+  session: 'SameSession',
+  sequence: 'Precedes',
+}
+
+/** Legend swatch for a connection category, a little stronger than on canvas. */
+export function edgeSampleColor(category: RelationCategory, theme: Theme): string {
+  const color = linkColor({ category, kind: EDGE_SAMPLE_KIND[category] }, theme)
+  return withAlpha(color, 0.85)
 }
 
 export function colorizeGraph(
@@ -163,11 +270,8 @@ export function nodeColorFn(
 ): (node: GraphNode) => string {
   if (mode === 'chain') return (node) => chainColor(node.chainKey)
   if (mode === 'agent') return (node) => agentColor(node.agent)
-  return (node) => familyColor(node.family, theme)
+  return (node) => typeColor(node.thoughtType, theme)
 }
-
-/** Muted ochre ring for contested thoughts. */
-export const CONTESTED_RING = '#c9a66b'
 
 export function withAlpha(color: string, alpha: number): string {
   if (color.startsWith('rgba(')) {

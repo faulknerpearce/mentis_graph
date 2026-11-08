@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listChains, loadThoughtsForChains } from './api/mentis'
 import { buildGraph, filterGraph, neighborIdsFor, searchNodes } from './graph/buildGraph'
-import { chainAnchors } from './graph/layout'
 import { buildTopicIndex, withTopics } from './graph/topics'
 import { FilterPanel } from './components/FilterPanel'
 import { Inspector } from './components/Inspector'
@@ -12,13 +11,11 @@ import { TopBar } from './components/TopBar'
 import { useTheme } from './hooks/useTheme'
 import { facetOptions } from './lib/facets'
 import {
-  CANVAS,
   categoricalScale,
   colorizeGraph,
-  familyColor,
+  edgeSampleColor,
   nodeColorFn,
-  relationColor,
-  withAlpha,
+  typeColor,
 } from './theme/palette'
 import type {
   ColorMode,
@@ -39,18 +36,13 @@ const ALL_EDGES: EdgeToggles = {
   sequence: true,
 }
 
-/** Topics carry the structure in the topic map; chain strands only tangle it. */
-const LAYOUT_DEFAULTS: Record<LayoutMode, { sequence: boolean; color: ColorMode }> = {
-  topics: { sequence: false, color: 'chain' },
-  chains: { sequence: true, color: 'type' },
-}
-
-const EDGE_SAMPLE_KIND: Record<RelationCategory, string> = {
-  lineage: 'Supersedes',
-  reasoning: 'DerivedFrom',
-  reference: 'References',
-  session: 'SameSession',
-  sequence: 'Precedes',
+/** Edges that shape each layout by default, and the colouring that reads best. */
+const LAYOUT_DEFAULTS: Record<
+  LayoutMode,
+  { sequence: boolean; session: boolean; color: ColorMode }
+> = {
+  network: { sequence: true, session: false, color: 'type' },
+  topics: { sequence: false, session: true, color: 'chain' },
 }
 
 export default function App() {
@@ -64,14 +56,15 @@ export default function App() {
   const [search, setSearch] = useState('')
   const [types, setTypes] = useState<Set<string> | null>(null)
   const [chains, setChains] = useState<Set<string> | null>(null)
-  const [layout, setLayout] = useState<LayoutMode>('topics')
+  const [layout, setLayout] = useState<LayoutMode>('network')
   const [edges, setEdges] = useState<EdgeToggles>({
     ...ALL_EDGES,
-    sequence: LAYOUT_DEFAULTS.topics.sequence,
+    sequence: LAYOUT_DEFAULTS.network.sequence,
+    session: LAYOUT_DEFAULTS.network.session,
   })
   const [showRetired, setShowRetired] = useState(false)
   const [until, setUntil] = useState<number | null>(null)
-  const [colorMode, setColorMode] = useState<ColorMode>(LAYOUT_DEFAULTS.topics.color)
+  const [colorMode, setColorMode] = useState<ColorMode>(LAYOUT_DEFAULTS.network.color)
   const [graphMode, setGraphMode] = useState<GraphMode>('2d')
   const [panelOpen, setPanelOpen] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -155,8 +148,6 @@ export default function App() {
     }
     return counts
   }, [fullGraph.nodes])
-
-  const anchors = useMemo(() => chainAnchors(chainCounts), [chainCounts])
 
   const chainColor = useMemo(
     () =>
@@ -285,7 +276,11 @@ export default function App() {
   const changeLayout = (next: LayoutMode) => {
     if (next === layout) return
     setLayout(next)
-    setEdges((prev) => ({ ...prev, sequence: LAYOUT_DEFAULTS[next].sequence }))
+    setEdges((prev) => ({
+      ...prev,
+      sequence: LAYOUT_DEFAULTS[next].sequence,
+      session: LAYOUT_DEFAULTS[next].session,
+    }))
     setColorMode(LAYOUT_DEFAULTS[next].color)
     setSelectedId(null)
     setLayoutResetKey((key) => key + 1)
@@ -326,7 +321,6 @@ export default function App() {
         <ThoughtGraph
           data={coloredGraph}
           layout={layout}
-          anchors={anchors}
           selectedId={selectedId}
           highlight={highlight}
           theme={theme}
@@ -360,13 +354,8 @@ export default function App() {
         <FilterPanel
           colorMode={colorMode}
           onColorModeChange={setColorMode}
-          familyColor={(family) => familyColor(family, theme)}
-          edgeColor={(category) =>
-            withAlpha(
-              relationColor(EDGE_SAMPLE_KIND[category], theme),
-              Math.max(0.5, CANVAS[theme].linkAlpha[category] * 2),
-            )
-          }
+          typeColor={(type) => typeColor(type, theme)}
+          edgeColor={(category) => edgeSampleColor(category, theme)}
           edgeCounts={edgeCounts}
           edges={edges}
           onEdgesChange={setEdges}

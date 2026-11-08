@@ -145,7 +145,7 @@ export function TopBar({
 
       <div className="actions glass">
         <div className="segmented compact" role="radiogroup" aria-label="Organise by">
-          {(['topics', 'chains'] as const).map((l) => (
+          {(['network', 'topics'] as const).map((l) => (
             <button
               key={l}
               type="button"
@@ -154,7 +154,7 @@ export function TopBar({
               className={layout === l ? 'is-active' : undefined}
               onClick={() => onLayoutChange(l)}
             >
-              {l === 'topics' ? 'Topics' : 'Chains'}
+              {l === 'topics' ? 'Topics' : 'Network'}
             </button>
           ))}
         </div>

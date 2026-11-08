@@ -6,7 +6,6 @@ import {
   searchNodes,
   thoughtTitle,
 } from './buildGraph'
-import { chainAnchors } from './layout'
 import { buildTopicIndex, normalizeTopic, thoughtTopics, withTopics } from './topics'
 import { toggleFacet } from '../lib/facets'
 import type { GraphFilters, GraphLink, Thought } from '../types'
@@ -312,20 +311,6 @@ describe('neighborIdsFor', () => {
   it('includes the selected node and its neighbours', () => {
     const ids = neighborIdsFor('a', [link('1', 'a', 'b'), link('2', 'c', 'a'), link('3', 'x', 'y')])
     expect(ids).toEqual(new Set(['a', 'b', 'c']))
-  })
-})
-
-describe('chainAnchors', () => {
-  it('places the largest chain at the centre and keeps regions apart', () => {
-    const anchors = chainAnchors(new Map([['small', 10], ['big', 400], ['mid', 100]]))
-    expect(anchors.get('big')).toMatchObject({ x: 0, y: 0 })
-    const list = [...anchors.values()]
-    for (const a of list) {
-      for (const b of list) {
-        if (a === b) continue
-        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.radius + b.radius)
-      }
-    }
   })
 })
 

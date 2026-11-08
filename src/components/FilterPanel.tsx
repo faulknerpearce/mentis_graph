@@ -6,7 +6,7 @@ import type { ColorMode, RelationCategory, EdgeToggles, FacetOption } from '../t
 interface FilterPanelProps {
   colorMode: ColorMode
   onColorModeChange: (mode: ColorMode) => void
-  familyColor: (family: string) => string
+  typeColor: (thoughtType: string) => string
   edgeColor: (category: RelationCategory) => string
   edgeCounts: Record<RelationCategory, number>
   edges: EdgeToggles
@@ -36,7 +36,7 @@ export function FilterPanel(props: FilterPanelProps) {
   const {
     colorMode,
     onColorModeChange,
-    familyColor,
+    typeColor,
     edgeColor,
     edgeCounts,
     edges,
@@ -175,7 +175,7 @@ export function FilterPanel(props: FilterPanelProps) {
               >
                 <i
                   className="dot"
-                  style={{ '--dot': colorMode === 'type' ? familyColor(family.id) : undefined } as CSSProperties}
+                  style={{ '--dot': colorMode === 'type' ? typeColor(family.options[0].value) : undefined } as CSSProperties}
                 />
                 <span>{family.label}</span>
                 <span className="count">{family.count}</span>
@@ -187,6 +187,7 @@ export function FilterPanel(props: FilterPanelProps) {
                       key={option.value}
                       option={option}
                       active={!types || types.has(option.value)}
+                      color={colorMode === 'type' ? typeColor(option.value) : undefined}
                       onToggle={() => onTypesChange(toggleFacet(types, [option.value], allTypes))}
                       onOnly={() => onTypesChange(new Set([option.value]))}
                     />
