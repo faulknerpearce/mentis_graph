@@ -63,6 +63,9 @@ const CLICK_MOVE_TOLERANCE_PX = 6
 const HIT_PADDING_PX = 12
 /** Minimum graph-space gap between rendered node circles. */
 const NODE_GAP = 8
+/** Links of the selected thought: near-opaque and this many times wider. */
+const SELECTED_LINK_ALPHA = 0.95
+const SELECTED_LINK_WIDTH = 2.6
 /** Zoom level above which thought labels are drawn. */
 const LABEL_ZOOM = 1.15
 const TOPIC_LABEL_ZOOM = 0.7
@@ -474,19 +477,36 @@ export function ThoughtGraph({
     [selectedId, hoveredId, isDimmed, palette, theme, font, layout],
   )
 
+  const touchesSelected = useCallback(
+    (l: GraphLink) =>
+      selectedId != null && (linkEnd(l.source) === selectedId || linkEnd(l.target) === selectedId),
+    [selectedId],
+  )
+
+  /**
+   * With a thought selected, its own links are drawn solid, strong and wide
+   * and every other link recedes. Otherwise links outside the highlight dim.
+   */
   const resolveLinkStyle = useCallback(
     (link: object) => {
       const l = link as GraphLink
-      const source = linkEnd(l.source)
-      const target = linkEnd(l.target)
-      const dimmed = Boolean(highlight) && !highlight!.has(source) && !highlight!.has(target)
+      if (touchesSelected(l)) {
+        return {
+          color: withAlpha(l.color, SELECTED_LINK_ALPHA),
+          width: linkWidth(l.category) * SELECTED_LINK_WIDTH,
+          dash: null,
+        }
+      }
+      const dimmed = selectedId
+        ? true
+        : Boolean(highlight) && !highlight!.has(linkEnd(l.source)) && !highlight!.has(linkEnd(l.target))
       return {
         color: dimmed ? withAlpha(l.color, palette.dimOpacity * 0.85) : l.color,
         width: linkWidth(l.category),
         dash: linkDash(l.category),
       }
     },
-    [highlight, palette],
+    [highlight, palette, selectedId, touchesSelected],
   )
 
   /** Lane bands and month gridlines, drawn beneath the nodes. */
@@ -636,9 +656,10 @@ export function ThoughtGraph({
             linkWidth={(link) => resolveLinkStyle(link).width}
             linkLineDash={(link) => resolveLinkStyle(link).dash}
             linkDirectionalArrowLength={(link) => {
-              const category = (link as GraphLink).category
-              if (category === 'topic') return 0
-              return category === 'sequence' ? 1.6 : 2.6
+              const l = link as GraphLink
+              if (l.category === 'topic') return 0
+              if (touchesSelected(l)) return 4.2
+              return l.category === 'sequence' ? 1.6 : 2.6
             }}
             linkDirectionalArrowRelPos={1}
             enableNodeDrag={false}
