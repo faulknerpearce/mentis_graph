@@ -42,7 +42,7 @@ Turn on **Show retired memories** to see the full history.
 - **Time slider**: scrub or replay how the network grew
 - **Search** (⌘K): highlights matches; Enter jumps to a result
 - **Inspector**: markdown content, importance and confidence, earlier versions, and connections grouped by relation (for example "Superseded by"). Clicking a topic lists its memories and the chains it spans
-- **Labels** (`#index · type`) appear once you zoom in; a selected thought also shows its title
+- **Labels** (`#index · type`) appear once you zoom in, and always on the selected thought
 - **2D + 3D modes**, light and dark themes, safe markdown rendering
 
 ## Prerequisites
