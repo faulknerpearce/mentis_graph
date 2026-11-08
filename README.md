@@ -8,10 +8,11 @@ Interactive force-directed viewer for [MentisDB](https://github.com/faulknerpear
 
 Mentis Graph connects to a local MentisDB daemon over REST and renders every loaded thought as a node in a 2D or 3D force graph. Nodes are coloured by thought type and sized by how connected and important they are.
 
-### Two views
+### Three views
 
 - **Network** (default): one force-directed graph of every thought. Append-order strands, references and relations pull thoughts together, so chains form long threads that knot where they reference each other. Session links are off by default in this view.
 - **Topics**: tags and concepts are cleaned into topics (dates, `verified:*` stamps and generic labels such as `checkpoint` are dropped, and `aseryx-` prefixes are merged). Each thought hangs from its most specific topic, and colouring by chain shows which subjects cross repos.
+- **Timeline**: time runs left to right with one horizontal lane per chain, largest on top. Each day's thoughts form a vertical stack in the order they were written; very busy days wrap into a second column. Reference links are off by default here.
 
 ### Connections
 
@@ -38,7 +39,7 @@ Turn on **Show retired memories** to see the full history.
 ## Features
 
 - **Color by** thought type, chain or agent, with a distinct colour per type in light and dark themes
-- **Timeline**: scrub or replay how the network grew
+- **Time slider**: scrub or replay how the network grew
 - **Search** (⌘K): highlights matches; Enter jumps to a result
 - **Inspector**: markdown content, importance and confidence, earlier versions, and connections grouped by relation (for example "Superseded by"). Clicking a topic lists its memories and the chains it spans
 - **Labels** (`#index · type`) appear once you zoom in; a selected thought also shows its title
@@ -72,11 +73,11 @@ Vite proxies `/api/*` → `http://127.0.0.1:9472/*` so the browser avoids CORS. 
 
 ## Usage
 
-- **View** (top right): switch between **Network** and **Topics**, and between 2D and 3D.
+- **View** (top right): switch between **Network**, **Topics** and **Timeline**, and between 2D and 3D.
 - **Filters** (left): color mode, memory state, connection types, chains and type families. Hover a row and click **only** to isolate it.
 - **Click a node** to open the inspector and light up its neighbourhood. Click a topic to see its memories. Esc closes either.
 - **Zoom in** to read labels: topic names appear first, then each thought's index and type.
-- **Timeline** (bottom): drag to show memory as it stood on a date, or press play.
+- **Time slider** (bottom): drag to show memory as it stood on a date, or press play.
 
 First load with many chains can take a moment while thoughts are traversed from MentisDB.
 
