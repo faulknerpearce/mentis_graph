@@ -15,8 +15,8 @@ export interface CanvasPalette {
   topic: string
   linkFallback: string
   dimOpacity: number
-  haloSelected: number
-  haloLarge: number
+  /** Solid fill for topic hubs, a step off the background. */
+  topicFill: string
   labelFont: string
 }
 
@@ -28,8 +28,7 @@ export const CANVAS: Record<Theme, CanvasPalette> = {
     topic: '#5b6570',
     linkFallback: 'rgba(90, 100, 112, 0.36)',
     dimOpacity: 0.28,
-    haloSelected: 0.2,
-    haloLarge: 0.1,
+    topicFill: '#e4e8ec',
     labelFont: '500 1em "Sora", system-ui, sans-serif',
   },
   dark: {
@@ -39,8 +38,7 @@ export const CANVAS: Record<Theme, CanvasPalette> = {
     topic: '#9aa3ad',
     linkFallback: 'rgba(160, 170, 185, 0.34)',
     dimOpacity: 0.22,
-    haloSelected: 0.32,
-    haloLarge: 0.16,
+    topicFill: '#171b22',
     labelFont: '500 1em "Sora", system-ui, sans-serif',
   },
 }

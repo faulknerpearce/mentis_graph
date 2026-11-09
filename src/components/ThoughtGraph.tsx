@@ -387,10 +387,10 @@ export function ThoughtGraph({
         const alpha = dimmed ? palette.dimOpacity : 1
         ctx.beginPath()
         ctx.arc(x, y, n.size, 0, 2 * Math.PI)
-        ctx.fillStyle = withAlpha(n.color, palette.haloLarge * alpha)
+        ctx.fillStyle = withAlpha(palette.topicFill, alpha)
         ctx.fill()
         ctx.lineWidth = (selected || hovered ? 1.6 : 1) / scale
-        ctx.strokeStyle = withAlpha(n.color, alpha * (selected || hovered ? 0.9 : 0.5))
+        ctx.strokeStyle = withAlpha(n.color, alpha)
         ctx.stroke()
         if (scale >= TOPIC_LABEL_ZOOM || selected) {
           ctx.font = font(Math.max(11 / scale, 2.6))
@@ -407,17 +407,6 @@ export function ThoughtGraph({
       const baseAlpha = retired ? 0.6 : 1
       const alpha = dimmed ? palette.dimOpacity * baseAlpha : baseAlpha
 
-      if (!retired && (selected || hovered || radius > 7)) {
-        ctx.beginPath()
-        ctx.arc(x, y, radius + (selected ? 3.2 : 2.2), 0, 2 * Math.PI)
-        ctx.fillStyle = withAlpha(
-          n.color,
-          (selected ? palette.haloSelected : hovered ? palette.haloSelected * 0.7 : palette.haloLarge) *
-            (dimmed ? palette.dimOpacity : 1),
-        )
-        ctx.fill()
-      }
-
       if (n.versions.length > 0 && !retired) {
         // Offset rings behind the node: earlier versions folded into it.
         const layers = Math.min(2, n.versions.length)
@@ -425,7 +414,7 @@ export function ThoughtGraph({
           ctx.beginPath()
           ctx.arc(x + i * radius * 0.3, y - i * radius * 0.3, radius, 0, 2 * Math.PI)
           ctx.lineWidth = Math.max(0.5, radius * 0.12)
-          ctx.strokeStyle = withAlpha(n.color, alpha * (0.55 - i * 0.15))
+          ctx.strokeStyle = withAlpha(n.color, alpha)
           ctx.stroke()
         }
       }
